@@ -1,12 +1,12 @@
 import os 
 import pdfplumber
 import chromadb
-from chromadb.config import Settings
+import chromadb
 from app.utils.text_splitter import split_text
 from app.utils.embedding_utils import get_embedding
 
 CHROMA_DIR = os.getenv("CHROMA_DIR", "./chroma_db")
-client = chromadb.Client(Settings(chroma_db_impl="duckdb+parquet", persist_directory=CHROMA_DIR))
+client = chromadb.PersistentClient(path=CHROMA_DIR)
 collection = client.get_or_create_collection(name="kontext")
 
 
@@ -27,7 +27,6 @@ def ingest_file(path: str, user_id: str = "demo"):
         metadatas.append({"chunk": i})
         embeddings.append(get_embedding(chunk))
     collection.add(documents=chunks, metadatas=metadatas, ids=ids, embeddings=embeddings)
-    client.persist()
     return {"inserted_chunks": len(chunks)}
 
 def retrive_for_query(query, k=5):

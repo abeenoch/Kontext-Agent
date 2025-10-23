@@ -1,15 +1,21 @@
 from fastapi import APIRouter, UploadFile, File, HTTPException
 from app.services.rag_pipeline import ingest_file
+import tempfile
+import os
 
 router = APIRouter()
 
-@router.post("/upload", summary="Upload a document for ingestion")
-async def upload_document(file: UploadFile = File(...), user_id:str="demo"):
-    if not file:
-        raise HTTPException(status_code=400, detail="No file uploaded")
-    contents = await file.read()
-    tmp_file_path = f"/tmp/{file.filename}"
+@router.post("/upload")
+async def upload_document(user_id: str, file: UploadFile = File(...)):
+    import tempfile, os
+    tmp_dir = tempfile.gettempdir()
+    safe_filename = file.filename.replace(" ", "_").replace("'", "_")
+    tmp_file_path = os.path.join(tmp_dir, safe_filename)
+
     with open(tmp_file_path, "wb") as f:
-        f.write(contents)
-    result = ingest_file(tmp_file_path, user_id=user_id)
-    return {"status": "ok", "chunks_added":result["inserted_chunks"]}
+        f.write(await file.read())
+
+    chunks_added = ingest_file(tmp_file_path, user_id)
+    os.remove(tmp_file_path)
+
+    return {"status": "ok", "chunks_added": chunks_added}
