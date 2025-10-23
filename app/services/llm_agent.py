@@ -1,5 +1,10 @@
 import os
 import requests
+from dotenv import load_dotenv
+
+
+load_dotenv()
+
 
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"  # 
@@ -10,7 +15,7 @@ def query_llm(prompt: str):
         "Content-Type": "application/json",
     }
     payload = {
-        "model": "llama3-70b-8192",   
+        "model": "openai/gpt-oss-20b",   
         "messages": [{"role": "user", "content": prompt}],
         "temperature": 0.7,
     }

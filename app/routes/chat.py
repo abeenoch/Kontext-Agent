@@ -14,5 +14,4 @@ async def chat(req:ChatRequest):
     context = retrive_for_query(req.query)
     prompt = f"Context:\n{context}\n\nUser: {req.query}\n\nAnswer clearly. If an action is needed, return JSON with 'action' and 'payload'."
     llm_resp = query_llm(prompt)
-    result = handle_llm_response(llm_resp)
-    return result
+    return {"response": llm_resp}
