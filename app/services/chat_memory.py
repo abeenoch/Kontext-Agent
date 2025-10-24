@@ -1,24 +1,43 @@
-from collections import defaultdict
-from datetime import datetime
+import time
+from sqlalchemy.future import select
+from app.db.chat_memory_db import SessionLocal, ChatMessage, Base, engine
 
-chat_history_store = {}
-
-def add_message(user_id:str, role:str, content:str):
-    if user_id not in chat_history_store:
-        chat_history_store[user_id] = []
-    chat_history_store[user_id].append({
-        "role": role,
-        "content": content,
-        "timestamp": datetime.now().isoformat()
-    })
-
-def get_recent_history(user_id: str, limit: int = 5):
-    """Return the most recent chat messages safely."""
-    if user_id not in chat_history_store:
-        chat_history_store[user_id] = []
-    return chat_history_store[user_id][-limit:]
+# Initialize DB on startup
+async def init_db():
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
 
 
-def clear_history(user_id: str):
-    chat_history_store[user_id] = []
+async def add_message(user_id: str, role: str, content: str):
+    """Save a message persistently."""
+    async with SessionLocal() as session:
+        msg = ChatMessage(
+            user_id=user_id,
+            role=role,
+            content=content,
+            timestamp=time.time()
+        )
+        session.add(msg)
+        await session.commit()
 
+
+async def get_recent_history(user_id: str, limit: int = 5):
+    """Retrieve last few messages for a user."""
+    async with SessionLocal() as session:
+        result = await session.execute(
+            select(ChatMessage)
+            .where(ChatMessage.user_id == user_id)
+            .order_by(ChatMessage.timestamp.desc())
+            .limit(limit)
+        )
+        messages = result.scalars().all()
+        # Return oldest-first order
+        return [{"role": m.role, "content": m.content} for m in reversed(messages)]
+
+
+async def clear_history(user_id: str):
+    async with SessionLocal() as session:
+        await session.execute(
+            f"DELETE FROM chat_messages WHERE user_id = :uid", {"uid": user_id}
+        )
+        await session.commit()
