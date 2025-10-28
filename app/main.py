@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.routes import docs,chat
 from dotenv import load_dotenv
 from app.services.chat_memory import init_db
-
+from app.routes import docs, chat, voice, meeting
 
 
 load_dotenv()
@@ -16,8 +16,10 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-app.include_router(docs.router, prefix="/docs_api", tags=["Documents"])
-app.include_router(chat.router, prefix="/chat", tags=["Chat"])
+app.include_router(docs.router)
+app.include_router(chat.router)
+app.include_router(voice.router)
+app.include_router(meeting.router)
 
 
 @app.on_event("startup")
