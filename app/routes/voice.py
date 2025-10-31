@@ -13,7 +13,7 @@ router = APIRouter(prefix="/voice", tags=["Voice Streaming"])
 @router.websocket("/live_chat")
 async def live_chat(websocket: WebSocket):
     await websocket.accept()
-    print("🎤 Voice chat session started")
+    print("Voice chat session started")
 
     try:
         while True:
@@ -22,13 +22,13 @@ async def live_chat(websocket: WebSocket):
                 await websocket.send_text("Conversation ended.")
                 break
 
-            print(f"📥 Received {len(data)} base64 chars from client")
+            print(f"Received {len(data)} base64 chars from client")
 
             user_text = await transcribe_audio_stream(data)
-            print(f"📝 Transcribed: {user_text}")
+            print(f"Transcribed: {user_text}")
 
             llm_reply = await generate_llm_reply(user_text)
-            print(f"🤖 LLM reply: {llm_reply}")
+            print(f"LLM reply: {llm_reply}")
 
             audio_b64 = await synthesize_speech(llm_reply)
 
@@ -39,7 +39,7 @@ async def live_chat(websocket: WebSocket):
             })
 
     except WebSocketDisconnect:
-        print("🔌 Client disconnected")
+        print("Client disconnected")
     except Exception as e:
         print(f"Error in live chat: {e}")
         await websocket.send_text(f"Error: {str(e)}")
