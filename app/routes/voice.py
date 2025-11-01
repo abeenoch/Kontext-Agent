@@ -56,10 +56,10 @@ async def live_chat_ui():
     <!DOCTYPE html>
     <html>
     <head>
-        <title>🎤 Buffered Voice Chat</title>
+        <title>Buffered Voice Chat</title>
     </head>
     <body style="font-family: sans-serif; padding: 20px;">
-        <h2>🎙️ Buffered Voice Chat with LLM</h2>
+        <h2>Buffered Voice Chat with LLM</h2>
         <button id="startBtn">Start Recording</button>
         <button id="stopBtn" disabled>Stop Recording</button>
         <p>Status: <span id="status">Disconnected</span></p>
@@ -79,7 +79,7 @@ async def live_chat_ui():
                     document.getElementById("status").innerText = "Connected 🎧";
                     document.getElementById("startBtn").disabled = true;
                     document.getElementById("stopBtn").disabled = false;
-                    console.log("✅ WebSocket connected");
+                    console.log("WebSocket connected");
                 };
 
                 ws.onmessage = (event) => {
@@ -108,7 +108,7 @@ async def live_chat_ui():
                     console.log("🔌 WebSocket closed");
                 };
 
-                // 🎙️ Start microphone recording
+                // Start microphone recording
                 const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
                 mediaRecorder = new MediaRecorder(stream, { mimeType: "audio/webm" });
                 chunks = [];
@@ -118,15 +118,15 @@ async def live_chat_ui():
                 };
 
                 mediaRecorder.start();
-                console.log("🎙️ Recording started");
+                console.log("Recording started");
             };
 
             document.getElementById("stopBtn").onclick = async () => {
-                console.log("🛑 Stopping recording...");
+                console.log("Stopping recording...");
                 mediaRecorder.stop();
 
                 mediaRecorder.onstop = async () => {
-                    console.log("📤 Sending full audio clip...");
+                    console.log("Sending full audio clip...");
                     const fullBlob = new Blob(chunks, { type: "audio/webm" });
                     const arrayBuffer = await fullBlob.arrayBuffer();
                     const base64Data = arrayBufferToBase64(arrayBuffer);
@@ -135,7 +135,7 @@ async def live_chat_ui():
                     chunks = [];
                 };
 
-                document.getElementById("status").innerText = "Stopped 🛑";
+                document.getElementById("status").innerText = "Stopped ";
                 document.getElementById("startBtn").disabled = false;
                 document.getElementById("stopBtn").disabled = true;
             };

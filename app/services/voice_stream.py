@@ -2,7 +2,8 @@ import os
 import tempfile
 import base64
 from typing import Optional
-
+import re
+from app.services.integrations_service import send_meeting_summary_email
 from app.utils.audio_utils import decode_webm_base64_to_wav_bytes
 from app.services.llm_agent import query_llm
 from app.services.tts_engine import synthesize  
@@ -58,3 +59,8 @@ async def synthesize_speech(text: str) -> str:
         return ""
     audio_bytes = synthesize(text)  
     return base64.b64encode(audio_bytes).decode("utf-8")
+
+def extract_emails_from_text(text: str):
+    """Extract all email addresses from a text string."""
+    pattern = r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}"
+    return re.findall(pattern, text)
