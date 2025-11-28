@@ -1,9 +1,45 @@
-version: '3.9'
+version: '3.8'
+
 services:
-  backend:
-    build: .
+  meeting-agent:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: kontext-meeting-agent
     ports:
-      - "8080:8080"
-    env_file: .env
+      - "8000:8000"
+    env_file:
+      - .env
+    environment:
+      # Override or add production-specific settings
+      - HOST=0.0.0.0
+      - PORT=8000
+      - LOG_LEVEL=INFO
+      - DB_PATH=/app/data/meetings.db
     volumes:
-      - .:/app
+      - ./data:/app/data
+      - ./logs:/app/logs
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - meeting-agent-network
+
+networks:
+  meeting-agent-network:
+    driver: bridge
+
+volumes:
+  data:
+    driver: local
+  logs:
+    driver: local
