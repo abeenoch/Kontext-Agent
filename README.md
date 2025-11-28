@@ -147,7 +147,7 @@ MIN_AUDIO_DURATION_SEC=10
 
 ### 2. During Meeting
 
-- **Live Transcripts**: See speech being transcribed in real-time
+- **Transcripts**: See speech being transcribed
 - **Periodic Summaries**: Every 10 minutes, a summary appears
 - **Audio Status**: Shows capture status and audio levels
 
