@@ -2,14 +2,13 @@
 
 **Automatically transcribe, summarize, and distribute meeting notes** — No expensive SaaS subscription required.
 
-Kontext is a self-hosted meeting assistant that captures audio from your microphone, transcribes it in real-time using OpenAI's Whisper, generates intelligent summaries with Groq's LLMs, and automatically sends them to email, Notion, or stores them locally.
+Kontext is a self-hosted meeting assistant that captures audio from your microphone, transcribes it in real-time using OpenAI's Whisper, generates intelligent summaries with Groq's LLMs, and automatically sends them to email, Notion on request, or stores them locally.
 
-Built for teams who want **privacy, control, and cost-efficiency**.
 
 ## Features ✨
 
 - **🎙️ Real-time Audio Capture**: WebRTC-based audio streaming from browser to backend
-- **📝 Live Transcription**: Streaming transcription using faster-Whisper (CPU-friendly)
+- **📝 Transcription**: Streaming transcription using faster-Whisper (CPU-friendly)
 - **✂️ Smart Summaries**: Automatic meeting summaries with key points, decisions, and action items
 - **📧 Email Integration**: Send meeting summaries directly to team members via email
 - **📘 Notion Integration**: Push summaries to Notion databases for team documentation
@@ -29,7 +28,7 @@ Built for teams who want **privacy, control, and cost-efficiency**.
 | **Vector DB** | Pinecone | Store and query meeting embeddings |
 | **Frontend** | Vanilla JavaScript + HTML | Lightweight, no frameworks |
 | **Database** | SQLite | Local persistent storage |
-| **Email** | SMTP (Gmail, Office365, etc) | Send summaries to team |
+| **Email** | SMTP (Gmail) | Send summaries to team |
 | **Notion API** | Official Python Client | Push to shared Notion databases |
 
 ## Quick Start 🚀
@@ -180,17 +179,7 @@ After meeting ends, you can:
 "Tell me about budget discussions"
 ```
 
-## Performance Metrics 📊
 
-| Metric | Value | Notes |
-|--------|-------|-------|
-| **Transcription Speed** | ~30s audio in 60s | Depends on CPU, longer audio = longer time |
-| **Transcription Accuracy** | 92-95% (Medium model) | Higher with larger Whisper model |
-| **Summary Generation** | 5-10 seconds | Via Groq LLM |
-| **Email Send** | <5 seconds | Via SMTP |
-| **Notion Push** | 5-10 seconds | API rate limited |
-| **Memory Usage** | ~2-3GB | During transcription |
-| **Disk Usage** | ~500MB per 1hr meeting | Compressed storage |
 
 ## Architecture 🏗️
 
@@ -258,15 +247,6 @@ After meeting ends, you can:
 3. Add your integration (search by name)
 4. Ensure database ID in .env is correct (with hyphens)
 
-### Email not sending
-
-**Cause**: Gmail app password or SMTP settings wrong
-
-**Solution**:
-1. Enable 2FA on Google Account
-2. Create app-specific password at https://myaccount.google.com/apppasswords
-3. Use that password (not your Google password) in .env
-4. Ensure SMTP settings match your email provider
 
 ## Development 👨‍💻
 
@@ -302,15 +282,6 @@ kontext-agent/
 └── README.md
 ```
 
-### Running Tests
-
-```bash
-# Run unit tests
-pytest tests/ -v
-
-# With coverage
-pytest tests/ --cov=app --cov-report=html
-```
 
 ### Adding Features
 
@@ -322,7 +293,7 @@ pytest tests/ --cov=app --cov-report=html
 
 ## Known Limitations ⚠️
 
-1. **Single meeting per connection**: Can't run multiple simultaneous meetings (easily fixable)
+1. **Single meeting per connection**: Can't run multiple simultaneous meetings
 2. **CPU transcription only**: Whisper on CPU is slower than GPU
 3. **No user authentication**: Add your own auth layer before deploying publicly
 4. **Browser-only audio**: CLI recorder (audio_recorder.py) available for scripting
@@ -336,28 +307,8 @@ pytest tests/ --cov=app --cov-report=html
 - [ ] Slack integration for instant notifications
 - [ ] Meeting sentiment analysis
 - [ ] Custom summary templates
-- [ ] Batch processing of external audio files
-- [ ] Mobile app for remote meetings
-- [ ] Advanced analytics dashboard
 
-## Cost Breakdown 💰
 
-**Monthly cost (for 10 meetings/week, 1hr each):**
-
-| Service | Cost | Notes |
-|---------|------|-------|
-| Groq LLM | $0 | Free tier covers ~1000 requests/day |
-| Whisper | Self-hosted | One-time download |
-| Pinecone | $0 | Free tier covers ~100k vectors |
-| Email | $0 | Gmail SMTP is free |
-| Notion | $0 | Free tier covers 1000 blocks/month |
-| **Total** | **$0** | ✅ Completely free! |
-
-Compare to:
-- **Otter.ai**: $10-25/month
-- **Rev**: $0.25-1/minute transcription
-- **Fireflies.ai**: $10-50/month
-- **Kontext**: $0 (self-hosted)
 
 ## Contributing 🤝
 
@@ -375,13 +326,11 @@ MIT License - see LICENSE file for details
 
 ## Support 💬
 
-- **Issues**: GitHub Issues
-- **Discussions**: GitHub Discussions
-- **Email**: support@kontext.local
+- **Email**: funboy.ea@gmail.com
 
 ## Why I Built This 🎯
 
-I attend multiple meetings daily at Payvite and other commitments. Traditional meeting assistants are expensive and lock data behind paywalls. I wanted:
+I attend multiple meetings daily at Payvite and other commitments. Traditional meeting assistants are expensive. I wanted:
 
 - ✅ **Privacy**: All data stays on my server
 - ✅ **Cost**: No monthly subscriptions
@@ -389,10 +338,8 @@ I attend multiple meetings daily at Payvite and other commitments. Traditional m
 - ✅ **Simplicity**: One-click to start recording
 - ✅ **Extensibility**: Add new integrations easily
 
-So I built Kontext — and it's been a game-changer for team documentation. Maybe it'll help you too!
+ Maybe it'll help you too!
 
 ---
 
-**Built with ❤️ by Payvite team**
 
-Questions? Open an issue or reach out!
