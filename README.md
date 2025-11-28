@@ -235,7 +235,7 @@ After meeting ends, you can:
 
 **Cause**: Large unprocessed audio buffer at end of meeting
 
-**Solution**: Fixed in v1.1 with progressive processing. Audio is now transcribed in 60-second chunks instead of all-at-once.
+**Solution**: Fixed  with progressive processing.
 
 ### Notion integration fails
 
