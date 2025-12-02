@@ -47,7 +47,14 @@ class Settings(BaseSettings):
     CHUNK_DURATION_MS: int = 500
     TRANSCRIPTION_WINDOW_SEC: int = 60 
     SUMMARY_INTERVAL_MIN: int = 10
-    MIN_AUDIO_DURATION_SEC: int = 10  
+    MIN_AUDIO_DURATION_SEC: int = 10
+    
+    # Streaming Mode
+    ENABLE_STREAMING: bool = True  # Use Groq streaming API for real-time transcription
+    STREAMING_PARTIAL_UPDATE_INTERVAL_MS: int = 100  # Update UI every 100-300ms with partial results
+    FRAME_SIZE_MS: int = 20  # Send 20ms audio frames for streaming (was 500ms chunks)
+    STREAMING_SUMMARY_INTERVAL_MIN: int = 0  # Summary interval in streaming mode (0 = every 30s, overrides SUMMARY_INTERVAL_MIN)
+    
     # FFmpeg (optional)
     FFMPEG_PATH: Optional[str] = None
     

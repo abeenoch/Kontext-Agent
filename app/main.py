@@ -8,6 +8,7 @@ from app.database import db
 from app.api.routes import router as api_router
 from app.api.websocket import meeting_websocket_endpoint
 from app.core.transcriber import transcriber
+from app.services.streaming_transcriber import streaming_transcriber
 
 # Configure logging
 logging.basicConfig(
@@ -30,11 +31,18 @@ async def lifespan(app: FastAPI):
     await transcriber.initialize()
     logger.info("Whisper model loaded successfully")
     
+    # Initialize streaming transcriber (Groq API)
+    if settings.ENABLE_STREAMING:
+        logger.info("Initializing Groq streaming transcriber...")
+        await streaming_transcriber.initialize()
+        logger.info("Groq streaming transcriber initialized")
+    
     yield
     
     # Shutdown
     logger.info("Shutting down Meeting Agent API...")
     await db.close()
+    await streaming_transcriber.close()
 
 
 # Create FastAPI app

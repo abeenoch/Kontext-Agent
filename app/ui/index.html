@@ -149,6 +149,19 @@
             border-left: 4px solid #667eea;
         }
 
+        /* Streaming transcript styling */
+        .transcript-interim {
+            border-left-color: #a0aec0;
+            background: #f7fafc;
+            opacity: 0.75;  /* Dimmed interim results */
+        }
+
+        .transcript-final {
+            border-left-color: #667eea;
+            background: white;
+            opacity: 1;  /* Full opacity for final results */
+        }
+
         .timestamp {
             font-size: 12px;
             color: #718096;
@@ -366,7 +379,7 @@
             }
         }
 
-        // Setup audio capture - FIXED FOR PCM
+        // Setup audio capture - STREAMING MODE (10-20ms frames for real-time)
         async function setupAudioCapture() {
             try {
                 // Get microphone stream with minimal processing to preserve audio quality
@@ -381,8 +394,8 @@
                 });
 
                 document.getElementById('audioStatus').innerHTML = 
-                    '✅ Capturing: <strong>Microphone</strong><br>' +
-                    '<small>System audio not available in this browser</small>';
+                    '✅ Capturing: <strong>Microphone</strong> (Streaming Mode)<br>' +
+                    '<small>10-20ms frames • Real-time transcription</small>';
 
                 // Create AudioContext for processing
                 audioContext = new (window.AudioContext || window.webkitAudioContext)({
@@ -392,8 +405,18 @@
                 // Create source from mic
                 const source = audioContext.createMediaStreamSource(micStream);
 
-                // Create ScriptProcessor for PCM extraction
-                const processor = audioContext.createScriptProcessor(8192, 1, 1);
+                // STREAMING MODE: Use AnalyserNode + getByteFrequencyData for continuous streaming
+                // Create ScriptProcessor with SMALLER buffer for real-time streaming (10-20ms frames)
+                // 16000 Hz sample rate: 
+                // - 512 samples = 32ms (too large)
+                // - 256 samples = 16ms (good for streaming)
+                // - 128 samples = 8ms (too frequent, overhead)
+                
+                const streamingFrameSize = 256;  // 16ms frames at 16kHz
+                const processor = audioContext.createScriptProcessor(streamingFrameSize, 1, 1);
+                
+                let frameCounter = 0;
+                let pendingFrames = [];  // Buffer frames for batch sending (optional optimization)
                 
                 processor.onaudioprocess = (e) => {
                     if (!isRecording || !ws || ws.readyState !== WebSocket.OPEN) return;
@@ -421,18 +444,19 @@
                         for (let i = 0; i < pcmData.length; i++) {
                             pcmData[i] = Math.max(-32768, Math.min(32767, Math.floor(pcmData[i] * scale)));
                         }
-                        
-                        // Uncomment to debug: console.log(`Audio normalized: ${maxAmp} → ${targetAmplitude}`);
                     }
 
-                    // Send as base64
+                    // Send as base64 (STREAMING: smaller frames, more frequent)
                     const base64 = arrayBufferToBase64(pcmData.buffer);
                     
+                    // STREAMING MODE: Send AUDIO_FRAME (not AUDIO_CHUNK)
+                    // Small frames every 16-20ms instead of 500ms chunks
                     ws.send(JSON.stringify({
-                        type: 'AUDIO_CHUNK',
+                        type: 'AUDIO_FRAME',  // Changed from AUDIO_CHUNK to distinguish streaming
                         meeting_id: meetingId,
                         data: base64,
-                        chunk_index: chunkCounter++,
+                        frame_index: frameCounter++,  // Changed from chunk_index
+                        frame_size_ms: (streamingFrameSize / 16000 * 1000),  // ~16ms
                         timestamp: Date.now() / 1000
                     }));
                 };
@@ -446,7 +470,7 @@
                 window.audioSource = source;
                 window.micStream = micStream;
 
-                console.log('Audio capture setup complete (PCM mode)');
+                console.log('Audio capture setup complete (STREAMING MODE: 16ms frames)');
 
             } catch (error) {
                 console.error('Audio setup failed:', error);
@@ -500,6 +524,11 @@
                     meetingId = data.meeting_id;
                     console.log('Meeting started:', meetingId);
                 }
+                // STREAMING MODE: Handle TRANSCRIPT_PARTIAL (interim results)
+                else if (data.type === 'TRANSCRIPT_PARTIAL') {
+                    addTranscriptPartial(data.text, data.is_final, data.timestamp);
+                }
+                // BATCH MODE or final result: Handle TRANSCRIPT_UPDATE
                 else if (data.type === 'TRANSCRIPT_UPDATE' || data.type === 'transcript_update') {
                     addTranscript(data.text);
                 }
@@ -565,15 +594,101 @@
             }
         }
 
+        // Handle streaming partial transcripts (interim results)
+        let currentPartialElement = null;
+        let interimStartTime = null;
+        
+        function addTranscriptPartial(text, isFinal, timestamp) {
+            const container = document.getElementById('transcripts');
+            
+            // If final, convert interim to final or create new final item
+            if (isFinal) {
+                if (currentPartialElement) {
+                    // Upgrade existing interim element to final
+                    currentPartialElement.classList.remove('transcript-interim');
+                    currentPartialElement.classList.add('transcript-final');
+                    
+                    // Update text to final styling
+                    const textDiv = currentPartialElement.querySelector('div:nth-child(2)');
+                    textDiv.style.color = '#1a202c';
+                    textDiv.style.fontWeight = '600';
+                    textDiv.style.opacity = '1';
+                    textDiv.style.fontStyle = 'normal';
+                    
+                    // Remove LIVE badge
+                    const liveBadge = currentPartialElement.querySelector('div:nth-child(3)');
+                    if (liveBadge) {
+                        liveBadge.remove();
+                    }
+                    
+                    currentPartialElement = null;
+                } else {
+                    // Create new final item (shouldn't happen, but fallback)
+                    const div = document.createElement('div');
+                    div.className = 'transcript-item transcript-final';
+                    div.innerHTML = `
+                        <div class="timestamp">${new Date().toLocaleTimeString()}</div>
+                        <div style="font-weight: 600; color: #1a202c;">${text}</div>
+                    `;
+                    container.appendChild(div);
+                }
+                scrollToBottom('transcripts');
+            } else {
+                // If interim (partial), update or create interim element
+                if (!currentPartialElement) {
+                    interimStartTime = new Date().toLocaleTimeString();
+                    currentPartialElement = document.createElement('div');
+                    currentPartialElement.className = 'transcript-item transcript-interim';
+                    currentPartialElement.innerHTML = `
+                        <div class="timestamp">${interimStartTime}</div>
+                        <div style="color: #4a5568; opacity: 0.7; font-style: italic;"></div>
+                        <div style="font-size: 11px; color: #a0aec0; margin-top: 4px; display: flex; align-items: center; gap: 6px;">
+                            <span style="display: inline-block; width: 6px; height: 6px; background: #f56565; border-radius: 50%; animation: pulse 1.5s infinite;"></span>
+                            LIVE
+                        </div>
+                    `;
+                    container.appendChild(currentPartialElement);
+                }
+                // Update interim text only (don't recreate)
+                const textDiv = currentPartialElement.querySelector('div:nth-child(2)');
+                if (textDiv) {
+                    textDiv.textContent = text;
+                }
+                scrollToBottom('transcripts');
+            }
+        }
+
         function addTranscript(text) {
             const container = document.getElementById('transcripts');
-            const div = document.createElement('div');
-            div.className = 'transcript-item';
-            div.innerHTML = `
-                <div class="timestamp">${new Date().toLocaleTimeString()}</div>
-                <div>${text}</div>
-            `;
-            container.appendChild(div);
+            
+            // If there's an interim element, upgrade it to final instead of creating duplicate
+            if (currentPartialElement) {
+                currentPartialElement.classList.remove('transcript-interim');
+                currentPartialElement.classList.add('transcript-final');
+                
+                const textDiv = currentPartialElement.querySelector('div:nth-child(2)');
+                textDiv.textContent = text;
+                textDiv.style.color = '#1a202c';
+                textDiv.style.fontWeight = '600';
+                textDiv.style.opacity = '1';
+                textDiv.style.fontStyle = 'normal';
+                
+                const liveBadge = currentPartialElement.querySelector('div:nth-child(3)');
+                if (liveBadge) {
+                    liveBadge.remove();
+                }
+                
+                currentPartialElement = null;
+            } else {
+                // No interim element, create new final item
+                const div = document.createElement('div');
+                div.className = 'transcript-item transcript-final';
+                div.innerHTML = `
+                    <div class="timestamp">${new Date().toLocaleTimeString()}</div>
+                    <div style="font-weight: 600; color: #1a202c;">${text}</div>
+                `;
+                container.appendChild(div);
+            }
             scrollToBottom('transcripts');
         }
 

@@ -12,6 +12,7 @@ from app.core.audio_processor import AudioBuffer, AudioValidator
 from app.core.transcriber import transcriber
 from app.core.summarizer import summarizer
 from app.core.rag_engine import rag_engine
+from app.services.streaming_transcriber import streaming_transcriber
 
 logger = logging.getLogger(__name__)
 
@@ -61,8 +62,10 @@ class MeetingWebSocketHandler:
             
             if msg_type == "START":
                 await self._handle_start(data)
-            elif msg_type == "AUDIO_CHUNK":
+            elif msg_type == "AUDIO_CHUNK":  # Backward compatibility (batch mode)
                 await self._handle_audio_chunk(data)
+            elif msg_type == "AUDIO_FRAME":  # Streaming mode
+                await self._handle_audio_frame(data)
             elif msg_type == "PING":
                 await self._handle_ping()
             elif msg_type == "STOP":
@@ -133,6 +136,40 @@ class MeetingWebSocketHandler:
             
         except Exception as e:
             logger.error(f"Audio chunk processing error: {e}", exc_info=True)
+    
+    async def _handle_audio_frame(self, data: dict):
+        """Handle AUDIO_FRAME message - add to buffer (streaming mode).
+        
+        Streaming mode sends 10-20ms frames continuously for real-time transcription.
+        """
+        if not self.meeting_active:
+            return
+        
+        try:
+            # Decode base64 audio
+            audio_b64 = data.get("data", "")
+            audio_bytes = base64.b64decode(audio_b64)
+            
+            frame_index = data.get("frame_index", -1)
+            frame_size_ms = data.get("frame_size_ms", 16)
+            
+            # DEBUG: Log frame
+            if len(audio_bytes) >= 2:
+                import numpy as np
+                audio_np = np.frombuffer(audio_bytes, dtype=np.int16).astype(np.float32) / 32768.0
+                max_amp = np.max(np.abs(audio_np)) if len(audio_np) > 0 else 0
+                logger.debug(f"[STREAMING] Frame {frame_index} ({frame_size_ms}ms): {len(audio_bytes)} bytes, max_amp={max_amp:.4f}")
+            
+            # Validate frame
+            if not self.validator.validate_pcm_chunk(audio_bytes):
+                logger.warning(f"[STREAMING] Invalid audio frame {frame_index}")
+                return
+            
+            # Add to buffer (same buffer used for both modes)
+            self.audio_buffer.add_chunk(audio_bytes)
+            
+        except Exception as e:
+            logger.error(f"[STREAMING] Audio frame processing error: {e}", exc_info=True)
     
     async def _handle_ping(self):
         """Handle PING message - send PONG."""
@@ -419,7 +456,23 @@ class MeetingWebSocketHandler:
         })
     
     async def _transcription_worker(self):
-        """Background worker for periodic transcription."""
+        """Background worker for periodic transcription.
+        
+        If ENABLE_STREAMING is true, uses Groq streaming API for real-time partial results.
+        Otherwise, falls back to batch transcription every TRANSCRIPTION_WINDOW_SEC.
+        """
+        try:
+            if settings.ENABLE_STREAMING:
+                await self._streaming_transcription_worker()
+            else:
+                await self._batch_transcription_worker()
+        except asyncio.CancelledError:
+            logger.info("Transcription worker cancelled")
+        except Exception as e:
+            logger.error(f"Transcription worker error: {e}", exc_info=True)
+    
+    async def _batch_transcription_worker(self):
+        """Original batch-based transcription worker."""
         try:
             while self.meeting_active:
                 await asyncio.sleep(10)  # Check every 10 seconds
@@ -469,14 +522,122 @@ class MeetingWebSocketHandler:
                     logger.debug(f"[WORKER] No speech detected in {duration_secs:.1f}s ({bytes_processed} bytes)")
                     
         except asyncio.CancelledError:
-            logger.info("Transcription worker cancelled")
+            logger.info("Batch transcription worker cancelled")
         except Exception as e:
-            logger.error(f"Transcription worker error: {e}", exc_info=True)
+            logger.error(f"Batch transcription worker error: {e}", exc_info=True)
+    
+    async def _streaming_transcription_worker(self):
+        """Streaming-based transcription worker using Groq API.
+        
+        Streams audio frames and broadcasts partial transcripts in real-time.
+        Falls back to batch mode if streaming unavailable.
+        """
+        try:
+            while self.meeting_active:
+                await asyncio.sleep(5)  # Check every 5 seconds for new audio
+                
+                # Get unprocessed audio
+                result = self.audio_buffer.get_unprocessed_audio()
+                
+                if result is None:
+                    total_audio_bytes = len(self.audio_buffer.buffer)
+                    processed_bytes = self.audio_buffer.processed_offset
+                    unprocessed_secs = (total_audio_bytes - processed_bytes) / (settings.SAMPLE_RATE * 2)
+                    logger.debug(f"[STREAMING] No audio ready (unprocessed={unprocessed_secs:.1f}s < MIN_DURATION)")
+                    continue
+                
+                audio_np, bytes_processed = result
+                duration_secs = bytes_processed / (settings.SAMPLE_RATE * 2)
+                
+                # Validate audio
+                if not self.validator.validate_audio_array(audio_np):
+                    logger.warning("[STREAMING] Invalid audio array, skipping transcription")
+                    self.audio_buffer.mark_processed(bytes_processed)
+                    continue
+                
+                logger.info(f"[STREAMING] Processing {duration_secs:.1f}s audio chunk with streaming API")
+                
+                # Use streaming transcriber
+                accumulated_final_text = ""
+                try:
+                    async for result in streaming_transcriber.transcribe_streaming(audio_np):
+                        if not self.meeting_active:
+                            break
+                        
+                        # Send partial result to client
+                        await self.websocket.send_json({
+                            "type": "TRANSCRIPT_PARTIAL",
+                            "meeting_id": self.meeting_id,
+                            "text": result.text,
+                            "is_final": result.is_final,
+                            "timestamp": datetime.utcnow().isoformat()
+                        })
+                        
+                        if result.is_final:
+                            accumulated_final_text = result.text
+                            logger.info(f"[STREAMING] Final result: {len(result.text)} chars")
+                        else:
+                            logger.debug(f"[STREAMING] Partial: {result.text[:50]}...")
+                        
+                        # Small delay to avoid overwhelming client
+                        await asyncio.sleep(0.05)
+                    
+                    # Mark as processed after streaming completes
+                    self.audio_buffer.mark_processed(bytes_processed)
+                    
+                    # Save final text to database
+                    if accumulated_final_text:
+                        await db.add_transcript(self.meeting_id, accumulated_final_text)
+                        
+                        # Send final update
+                        await self.websocket.send_json({
+                            "type": "TRANSCRIPT_UPDATE",
+                            "meeting_id": self.meeting_id,
+                            "text": accumulated_final_text,
+                            "timestamp": datetime.utcnow().isoformat()
+                        })
+                    
+                except Exception as e:
+                    logger.error(f"[STREAMING] Streaming transcription error: {e}", exc_info=True)
+                    
+                    # Fall back to batch transcription
+                    logger.info("[STREAMING] Falling back to batch transcription")
+                    try:
+                        text = await transcriber.transcribe(audio_np)
+                        self.audio_buffer.mark_processed(bytes_processed)
+                        
+                        if text:
+                            await db.add_transcript(self.meeting_id, text)
+                            await self.websocket.send_json({
+                                "type": "TRANSCRIPT_UPDATE",
+                                "meeting_id": self.meeting_id,
+                                "text": text,
+                                "timestamp": datetime.utcnow().isoformat()
+                            })
+                            logger.info(f"[STREAMING→BATCH] Transcribed {duration_secs:.1f}s -> {len(text)} chars")
+                    except Exception as batch_error:
+                        logger.error(f"[STREAMING→BATCH] Batch fallback also failed: {batch_error}", exc_info=True)
+                        self.audio_buffer.mark_processed(bytes_processed)
+                    
+        except asyncio.CancelledError:
+            logger.info("Streaming transcription worker cancelled")
+        except Exception as e:
+            logger.error(f"Streaming transcription worker error: {e}", exc_info=True)
     
     async def _summarization_worker(self):
-        """Background worker for periodic summarization."""
+        """Background worker for periodic summarization.
+        
+        When ENABLE_STREAMING is true, runs every 30 seconds (faster updates).
+        Otherwise, runs every SUMMARY_INTERVAL_MIN (default 10 min).
+        """
         try:
-            interval = settings.summary_interval_seconds
+            # Determine interval based on mode
+            if settings.ENABLE_STREAMING:
+                interval = 30  # Real-time mode: update every 30 seconds
+                logger.info("[SUMMARY] Running in STREAMING mode: 30-second intervals")
+            else:
+                interval = settings.summary_interval_seconds
+                logger.info(f"[SUMMARY] Running in BATCH mode: {interval}-second intervals")
             
             while self.meeting_active:
                 await asyncio.sleep(interval)
@@ -485,6 +646,7 @@ class MeetingWebSocketHandler:
                 transcript = await db.get_full_transcript(self.meeting_id)
                 
                 if len(transcript) < 100:
+                    logger.debug("[SUMMARY] Transcript too short, skipping summary")
                     continue
                 
                 # Generate intermediate summary
@@ -498,10 +660,11 @@ class MeetingWebSocketHandler:
                     "type": "SUMMARY_UPDATE",
                     "meeting_id": self.meeting_id,
                     "summary": summary,
-                    "timestamp": datetime.utcnow().isoformat()
+                    "timestamp": datetime.utcnow().isoformat(),
+                    "mode": "streaming" if settings.ENABLE_STREAMING else "batch"
                 })
                 
-                logger.info("Generated periodic summary")
+                logger.info(f"[SUMMARY] Generated periodic summary ({len(summary)} chars)")
                 
         except asyncio.CancelledError:
             logger.info("Summarization worker cancelled")

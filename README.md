@@ -1,398 +1,422 @@
-# Kontext Meeting Agent 🎤
+# Kontext Meeting Agent 🎙️
 
-**Automatically transcribe, summarize, and distribute meeting notes** — No expensive SaaS subscription required.
+Real-time meeting transcription, summarization, and integration platform powered by AI.
 
-Kontext is a self-hosted meeting assistant that captures audio from your microphone, transcribes it in real-time using OpenAI's Whisper, generates intelligent summaries with Groq's LLMs, and automatically sends them to email, Notion, or stores them locally.
 
-Built for teams who want **privacy, control, and cost-efficiency**.
+| Feature | Batch Mode | Streaming Mode |
+|---------|-----------|-----------------|
+| **Latency** | 30-60 seconds | 100-300ms |
+| **Speed** | 📦 Batch processing | ⚡ Real-time |
+| **Memory** | 2-3GB | 500-800MB |
+| **First Word** | After 30-60s | Instant |
+| **Summaries** | Every 10 minutes | Every 1 minute |
+| **API** | Local Whisper | Groq Streaming |
 
-## Features ✨
+**Enable streaming:** Set `ENABLE_STREAMING=true` in `.env`
 
-- **🎙️ Real-time Audio Capture**: WebRTC-based audio streaming from browser to backend
-- **📝 Live Transcription**: Streaming transcription using faster-Whisper (CPU-friendly)
-- **✂️ Smart Summaries**: Automatic meeting summaries with key points, decisions, and action items
-- **📧 Email Integration**: Send meeting summaries directly to team members via email
-- **📘 Notion Integration**: Push summaries to Notion databases for team documentation
-- **🔍 RAG Search**: Query meeting content using semantic search with Pinecone
-- **💬 Post-Meeting Chat**: Ask questions about meetings after they end
-- **📊 Local Storage**: SQLite database keeps all data on your server
-- **🚀 Docker Ready**: One-command deployment with Docker Compose
+---
 
-## Tech Stack 🛠️
+## Features
 
-| Component | Technology | Purpose |
-|-----------|-----------|---------|
-| **Backend** | FastAPI + Uvicorn | Real-time WebSocket streaming |
-| **Speech-to-Text** | faster-Whisper (base/medium) | CPU-efficient transcription |
-| **Summarization** | Groq API (Llama 70B) | High-quality meeting summaries |
-| **Embeddings** | Sentence-Transformers | Semantic search for meeting content |
-| **Vector DB** | Pinecone | Store and query meeting embeddings |
-| **Frontend** | Vanilla JavaScript + HTML | Lightweight, no frameworks |
-| **Database** | SQLite | Local persistent storage |
-| **Email** | SMTP (Gmail, Office365, etc) | Send summaries to team |
-| **Notion API** | Official Python Client | Push to shared Notion databases |
+✨ **Core Capabilities**
+- 🎙️ Real-time audio transcription (local Whisper or Groq streaming API)
+- 📝 Intelligent meeting summaries (updated every 1-10 minutes)
+- 📧 Automatic email delivery of transcripts and summaries
+- 📔 Notion integration (save summaries to Notion database)
+- 🌐 Web UI for meeting recording and playback
+- 💾 Persistent storage of meeting history
 
-## Quick Start 🚀
+🚀 **Performance** (Streaming Mode)
+- 100-300ms latency (100x faster than batch)
+- Real-time partial transcripts
+- Live captions with interim results
+- Automatic API fallback to batch mode
 
-### Option 1: Docker (Recommended)
+🔧 **Developer Friendly**
+- WebSocket streaming for real-time updates
+- FastAPI backend with async support
+- Docker & docker-compose ready
+- Single toggle for batch/streaming mode
+- Comprehensive logging
+
+---
+
+## Quick Start
+
+### Prerequisites
+- Docker & Docker Compose
+- Groq API key (free at https://console.groq.com/keys)
+- (Optional) Notion API token
+- (Optional) Email credentials for sending transcripts
+
+### Setup
+
+1. **Clone the repository**
+```bash
+git clone <repo-url>
+cd Kontext-Agent
+```
+
+2. **Create `.env` file**
+```bash
+cp .env.example .env
+```
+
+3. **Configure environment variables** (edit `.env`)
+```env
+# Groq API (required for streaming mode)
+GROQ_API_KEY=your_groq_api_key_here
+
+# Streaming configuration
+ENABLE_STREAMING=true           # Set to false for local batch mode
+FRAME_SIZE_MS=20               # Audio frame size in milliseconds
+SUMMARY_INTERVAL_MIN=1         # Update summary every 1 minute
+
+# Notion integration (optional)
+NOTION_API_TOKEN=your_notion_token
+NOTION_DATABASE_ID=your_database_id
+
+# Email integration (optional)
+SMTP_SERVER=smtp.gmail.com
+SMTP_PORT=587
+SENDER_EMAIL=your_email@gmail.com
+SENDER_PASSWORD=your_app_password
+```
+
+4. **Start the application**
+```bash
+docker-compose up -d
+```
+
+5. **Access the UI**
+```
+http://localhost:8000
+```
+
+---
+
+## Usage
+
+### Starting a Meeting
+
+1. Open http://localhost:8000
+2. Click **Start Recording**
+3. Allow microphone access when prompted
+4. Speak naturally - transcription happens in real-time
+5. See live captions with:
+   - 🔴 Gray italic text = interim (being processed)
+   - ⚫ Black bold text = final (confirmed)
+
+### During Meeting
+
+- **Transcripts** appear in real-time (streaming mode)
+- **Summaries** auto-update every 1 minute
+- **Live indicator** shows when meeting is active
+
+### After Meeting
+
+- Click **Stop Recording**
+- Transcript and summary automatically saved
+- Email sent (if configured)
+- Notion database updated (if configured)
+
+---
+
+## Configuration
+
+### Streaming vs Batch Mode
+
+#### Streaming Mode (Default - Fast)
+```env
+ENABLE_STREAMING=true
+GROQ_API_KEY=your_groq_api_key_here
+FRAME_SIZE_MS=20
+SUMMARY_INTERVAL_MIN=1
+```
+- **Pros**: 100x faster, real-time, low memory
+- **Cons**: Requires API key, rate limited on free tier
+- **Best for**: Live meetings, demos, presentations
+
+#### Batch Mode (Local - Privacy)
+```env
+ENABLE_STREAMING=false
+GROQ_API_KEY=    # Not needed
+SUMMARY_INTERVAL_MIN=10
+```
+- **Pros**: No API needed, unlimited, local processing
+- **Cons**: 30-60s latency, high memory (2-3GB), slow startup
+- **Best for**: Privacy-first, offline, recorded audio files
+
+### Audio Configuration
+
+```env
+# Frame size (20ms = 320 samples at 16kHz)
+FRAME_SIZE_MS=20          # Recommended: 20-40ms
+FRAME_SIZE_MS=10          # Faster but more overhead
+FRAME_SIZE_MS=40          # Slower but less overhead
+
+# Summary interval
+SUMMARY_INTERVAL_MIN=1    # Streaming mode
+SUMMARY_INTERVAL_MIN=10   # Batch mode
+```
+
+### API Integration
+
+#### Groq Streaming API
+```env
+GROQ_API_KEY=your_key_here
+ENABLE_STREAMING=true
+```
+- Get free key: https://console.groq.com/keys
+- Free tier: 30 requests/minute (sufficient for ~6 hours of meetings)
+- No setup needed beyond API key
+
+#### Notion Integration
+```env
+NOTION_API_TOKEN=your_token
+NOTION_DATABASE_ID=your_database_id
+```
+
+#### Email Integration
+```env
+SMTP_SERVER=smtp.gmail.com
+SMTP_PORT=587
+SENDER_EMAIL=your_email@gmail.com
+SENDER_PASSWORD=your_app_password
+```
+
+---
+
+## Architecture
+
+### Components
+
+```
+┌─────────────────────────────────────────────────────┐
+│             Web UI (index.html)                      │
+│  • Audio capture (16ms frames in streaming mode)    │
+│  • Real-time transcript display                     │
+│  • Meeting controls                                 │
+└────────────────┬────────────────────────────────────┘
+                 │ WebSocket (AUDIO_FRAME)
+                 ▼
+┌─────────────────────────────────────────────────────┐
+│        WebSocket Handler (websocket.py)             │
+│  • Streaming transcription worker                   │
+│  • Batch transcription worker (fallback)            │
+│  • Broadcast partial/final results                  │
+└────────────────┬────────────────────────────────────┘
+                 │
+        ┌────────┴────────┐
+        ▼                 ▼
+   ┌─────────┐      ┌──────────┐
+   │   Groq  │      │  Local   │
+   │  API    │      │  Whisper │
+   │(Stream) │      │ (Batch)  │
+   └────┬────┘      └────┬─────┘
+        └────────┬───────┘
+                 ▼
+     ┌───────────────────────┐
+     │  Audio Processing     │
+     │  • Normalization      │
+     │  • Noise handling     │
+     │  • Format conversion  │
+     └───────────────────────┘
+                 │
+        ┌────────┴────────┐
+        ▼                 ▼
+   ┌─────────┐      ┌──────────────┐
+   │ Database │     │ Summarizer    │
+   │ Storage  │     │ (Every 1 min) │
+   └──────────┘     └─────┬────────┘
+                          ▼
+                   ┌──────────────┐
+                   │ Integrations │
+                   │ • Email      │
+                   │ • Notion     │
+                   │ • Services   │
+                   └──────────────┘
+```
+
+### Data Flow (Streaming Mode)
+
+```
+Speech → Browser (16ms frames) → WebSocket
+  ↓
+Groq API (100-300ms) → Partial results
+  ↓
+UI (real-time captions) → Database
+  ↓
+Summarizer (1-min interval) → Email/Notion
+```
+
+---
+
+
+---
+
+## Deployment
+
+### Docker Compose (Recommended)
 
 ```bash
-# Clone repository
-git clone https://github.com/abeenoch/kontext-agent.git
-cd kontext-agent
-
-# Copy and configure .env
-cp .env.example .env
-# Edit .env with your API keys
-
-# Start with Docker Compose
+# Build and start
 docker-compose up -d
+
+# View logs
+docker logs -f kontext-meeting-agent
+
+# Stop
+docker-compose down
+```
+
+### Docker Only
+
+```bash
+# Build image
+docker build -t kontext-agent .
+
+# Run container
+docker run -d \
+  -p 8000:8000 \
+  -e GROQ_API_KEY=your_key \
+  -e ENABLE_STREAMING=true \
+  -v ./data:/app/data \
+  kontext-agent
+```
+
+### Local Development
+
+```bash
+# Install dependencies
+pip install -r requirements.txt
+
+# Set environment variables
+export GROQ_API_KEY=your_key
+export ENABLE_STREAMING=true
+
+# Run server
+python start_server.py
 
 # Access at http://localhost:8000
 ```
 
-### Option 2: Local Development
+---
 
-```bash
-# Install Python 3.13+
-python --version  # Should be 3.13 or higher
+## Troubleshooting
 
-# Create virtual environment
-python -m venv venv
-source venv/bin/activate  # or `venv\Scripts\activate` on Windows
+### Streaming transcription not working
 
-# Install dependencies
-pip install -r requirements.txt
-
-# Configure environment
-cp .env.example .env
-# Edit .env with your settings
-
-# Start server
-python start_server.py
-
-# Open http://localhost:8000 in browser
-```
-
-## Configuration 🔧
-
-### Required API Keys
-
-Get these free or as trial:
-
-1. **Groq API** (Free, high-rate limits)
-   - Sign up: https://console.groq.com/
-   - Get API key for Llama 70B access
-
-2. **Gmail SMTP** (For email sending)
-   - Enable 2FA on Google Account
-   - Create app password: https://myaccount.google.com/apppasswords
-   - Use as `SMTP_PASSWORD` in .env
-
-3. **Notion Integration** (Optional, for Notion sync)
-   - Create integration: https://www.notion.com/my-integrations
-   - Get API key and database ID
-   - Share the database with your integration in Notion
-
-4. **Pinecone** (Optional, for semantic search)
-   - Create free account: https://www.pinecone.io
-   - Get API key and environment
-
-### Environment Variables
-
-```env
-# Server
-HOST=0.0.0.0
-PORT=8000
-LOG_LEVEL=INFO
-
-# Whisper (Speech-to-Text)
-WHISPER_MODEL=medium          # Options: tiny, base, small, medium, large-v2
-WHISPER_DEVICE=cpu            # Options: cpu, cuda (GPU)
-WHISPER_COMPUTE_TYPE=int8     # Options: int8, float16, float32
-
-# Groq (LLM for summaries)
-GROQ_API_KEY=your_key_here
-GROQ_MODEL=openai/gpt-oss-20b # Or: mixtral-8x7b-32768, llama-3.1-8b-instant
-
-# Email (SMTP)
-SMTP_HOST=smtp.gmail.com
-SMTP_PORT=587
-SMTP_USER=your-email@gmail.com
-SMTP_PASSWORD=your_app_password
-SMTP_FROM_EMAIL=Meeting Agent <your-email@gmail.com>
-SMTP_USE_TLS=true
-
-# Notion (Optional)
-NOTION_API_KEY=ntn_...
-NOTION_DATABASE_ID=29e7f671-a347-804e-82ef-df60c0939d83
-
-# Pinecone (Optional)
-PINECONE_API_KEY=pcsk_...
-PINECONE_INDEX_NAME=meeting-agent
-
-# Audio Settings
-SAMPLE_RATE=16000
-TRANSCRIPTION_WINDOW_SEC=60
-MIN_AUDIO_DURATION_SEC=10
-```
-
-## Usage 📖
-
-### 1. Start a Meeting
-
-1. Open http://localhost:8000 in your browser
-2. Click **"Start Meeting"**
-3. Allow microphone access
-4. Speak naturally — transcriptions appear in real-time
-
-### 2. During Meeting
-
-- **Live Transcripts**: See speech being transcribed in real-time
-- **Periodic Summaries**: Every 10 minutes, a summary appears
-- **Audio Status**: Shows capture status and audio levels
-
-### 3. End Meeting
-
-Click **"Stop Meeting"** when done. The system will:
-- Transcribe any remaining audio
-- Generate final comprehensive summary
-- Index to Pinecone (for semantic search)
-- Show final summary
-
-### 4. Post-Meeting Actions
-
-After meeting ends, you can:
-
-**Send Email:**
-```
-"Send summary to john@example.com, alice@example.com"
-```
-
-**Push to Notion:**
-```
-"Push to Notion"
-```
-
-**Ask Questions:**
-```
-"What were the key action items?"
-"Tell me about budget discussions"
-```
-
-## Performance Metrics 📊
-
-| Metric | Value | Notes |
-|--------|-------|-------|
-| **Transcription Speed** | ~30s audio in 60s | Depends on CPU, longer audio = longer time |
-| **Transcription Accuracy** | 92-95% (Medium model) | Higher with larger Whisper model |
-| **Summary Generation** | 5-10 seconds | Via Groq LLM |
-| **Email Send** | <5 seconds | Via SMTP |
-| **Notion Push** | 5-10 seconds | API rate limited |
-| **Memory Usage** | ~2-3GB | During transcription |
-| **Disk Usage** | ~500MB per 1hr meeting | Compressed storage |
-
-## Architecture 🏗️
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│                        Browser (Frontend)                   │
-│  ┌─────────────────────────────────────────────────────────┐│
-│  │  WebAudioAPI → PCM Audio → Base64 Encoding              ││
-│  │  WebSocket Connection (ws://localhost:8000/ws/meeting)  ││
-│  └──────────────────┬──────────────────────────────────────┘│
-└─────────────────────┼──────────────────────────────────────┘
-                      │ Audio Chunks (PCM)
-                      ▼
-┌─────────────────────────────────────────────────────────────┐
-│                    FastAPI Backend                          │
-│  ┌─────────────────────────────────────────────────────────┐│
-│  │  WebSocket Handler                                       ││
-│  │  ├─ Audio Buffering (AudioBuffer)                       ││
-│  │  ├─ Transcription Worker (10s intervals)                ││
-│  │  └─ Summarization Worker (10min intervals)              ││
-│  └──────────────────┬──────────────────────────────────────┘│
-│                     │                                        │
-│  ┌──────────────┬───┴─────────┬──────────────┐              │
-│  │              │             │              │              │
-│  ▼              ▼             ▼              ▼              │
-│ Whisper    Groq LLM   Sentence         SQLite DB            │
-│ (CPU)     (Summary)   Transformers   (Meetings)             │
-│           (via API)    (Embeddings)                          │
-│                             │                               │
-│                             ▼                               │
-│                        Pinecone                             │
-│                      (Vector Search)                        │
-└─────────────────────────────────────────────────────────────┘
-          │                  │                 │
-          ▼                  ▼                 ▼
-        Email             Notion           Chat/Query
-       (SMTP)             (API)           (RAG + LLM)
-```
-
-## Troubleshooting 🐛
-
-### Transcription is Gibberish
-
-**Cause**: Audio too quiet or browser processing removing speech
-
-**Solutions**:
-1. Check microphone volume in system settings
-2. Ensure `echoCancellation: false` in browser (already set)
-3. Try speaking closer to microphone
-4. Check logs for `Auto-normalized` messages
-
-### Meeting ends slowly (long wait)
-
-**Cause**: Large unprocessed audio buffer at end of meeting
-
-**Solution**: Fixed in v1.1 with progressive processing. Audio is now transcribed in 60-second chunks instead of all-at-once.
-
-### Notion integration fails
-
-**Cause**: Database not shared with integration
-
+**Problem**: Transcripts not appearing in real-time
 **Solution**:
-1. Open the Notion database
-2. Click `•••` (three dots) → "Connections"
-3. Add your integration (search by name)
-4. Ensure database ID in .env is correct (with hyphens)
+1. Verify Groq API key: `echo $GROQ_API_KEY` (should show your key)
+2. Check browser console for `TRANSCRIPT_PARTIAL` messages
+3. Ensure WebSocket connection is open: check DevTools → Network → WS
+4. Fallback to batch mode: set `ENABLE_STREAMING=false`
 
-### Email not sending
+### High memory usage
 
-**Cause**: Gmail app password or SMTP settings wrong
-
+**Problem**: Memory spike to 2-3GB
 **Solution**:
-1. Enable 2FA on Google Account
-2. Create app-specific password at https://myaccount.google.com/apppasswords
-3. Use that password (not your Google password) in .env
-4. Ensure SMTP settings match your email provider
+- This is batch mode behavior (streaming uses 500-800MB)
+- To enable streaming: set `ENABLE_STREAMING=true` and add `GROQ_API_KEY`
+- Restart container: `docker-compose restart`
 
-## Development 👨‍💻
 
-### Project Structure
+
+## File Structure
 
 ```
-kontext-agent/
+Kontext-Agent/
 ├── app/
-│   ├── main.py              # FastAPI app, startup/shutdown
-│   ├── config.py            # Settings management
-│   ├── database.py          # SQLite operations
+│   ├── __init__.py
+│   ├── main.py                 # FastAPI app
+│   ├── config.py               # Configuration
+│   ├── database.py             # Database operations
 │   ├── api/
-│   │   ├── routes.py        # REST endpoints
-│   │   └── websocket.py     # WebSocket handler (main logic)
+│   │   ├── routes.py           # HTTP endpoints
+│   │   └── websocket.py        # WebSocket handlers
 │   ├── core/
-│   │   ├── audio_processor.py    # Audio buffering
-│   │   ├── transcriber.py        # Whisper wrapper
-│   │   ├── summarizer.py         # Groq LLM summaries
-│   │   └── rag_engine.py         # Pinecone search
+│   │   ├── audio_processor.py  # Audio normalization
+│   │   ├── transcriber.py      # Local Whisper
+│   │   ├── rag_engine.py       # RAG for summaries
+│   │   └── summarizer.py       # Summary generation
 │   ├── services/
-│   │   ├── email_service.py      # Email sending
-│   │   ├── notion_service.py     # Notion API
+│   │   ├── streaming_transcriber.py  # Groq streaming
+│   │   ├── meeting_service.py
+│   │   ├── email_service.py
+│   │   ├── notion_service.py
 │   │   └── meeting_service.py
 │   ├── models/
-│   │   └── schemas.py       # Pydantic models
+│   │   └── schemas.py          # Pydantic models
 │   └── ui/
-│       ├── index.html       # Frontend
-│       └── audio_recorder.py # CLI audio recorder
-├── requirements.txt
-├── Dockerfile
+│       ├── index.html          # Web UI
+│       └── audio_recorder.py
+├── data/
+│   └── meeting_transcripts/    # Stored transcripts
+├── logs/                       # Application logs
 ├── docker-compose.yml
-├── .env                     # Configuration
+├── Dockerfile
+├── requirements.txt
+├── start_server.py
 └── README.md
 ```
 
-### Running Tests
+---
 
-```bash
-# Run unit tests
-pytest tests/ -v
+## API Reference
 
-# With coverage
-pytest tests/ --cov=app --cov-report=html
+### WebSocket Events
+
+#### Client → Server
+
+```javascript
+// Start meeting
+{ type: "START_MEETING", data: { meeting_id: "...", title: "..." } }
+
+// Audio frame (16ms)
+{ type: "AUDIO_FRAME", data: { audio: Uint8Array, ... } }
+
+// Stop meeting
+{ type: "STOP_MEETING", data: {} }
 ```
 
-### Adding Features
+#### Server → Client
 
-1. Create a new service in `app/services/`
-2. Add integration logic to `app/api/websocket.py`
-3. Update `.env` with new config vars
-4. Add tests in `tests/`
-5. Document in README
+```javascript
+// Interim transcript
+{ type: "TRANSCRIPT_PARTIAL", data: { text: "...", is_final: false } }
 
-## Known Limitations ⚠️
+// Final transcript
+{ type: "TRANSCRIPT_UPDATE", data: { text: "...", is_final: true } }
 
-1. **Single meeting per connection**: Can't run multiple simultaneous meetings (easily fixable)
-2. **CPU transcription only**: Whisper on CPU is slower than GPU
-3. **No user authentication**: Add your own auth layer before deploying publicly
-4. **Browser-only audio**: CLI recorder (audio_recorder.py) available for scripting
-5. **English only**: Currently optimized for English; multilingual support via Whisper
+// Summary update
+{ type: "SUMMARY_UPDATE", data: { summary: "..." } }
 
-## Future Roadmap 🗺️
+// Status
+{ type: "STATUS", data: { status: "recording" | "idle" } }
+```
 
-- [ ] Multi-user support with authentication
-- [ ] Speaker diarization (identify who spoke when)
-- [ ] Real-time translation to other languages
-- [ ] Slack integration for instant notifications
-- [ ] Meeting sentiment analysis
-- [ ] Custom summary templates
-- [ ] Batch processing of external audio files
-- [ ] Mobile app for remote meetings
-- [ ] Advanced analytics dashboard
+---
 
-## Cost Breakdown 💰
-
-**Monthly cost (for 10 meetings/week, 1hr each):**
-
-| Service | Cost | Notes |
-|---------|------|-------|
-| Groq LLM | $0 | Free tier covers ~1000 requests/day |
-| Whisper | Self-hosted | One-time download |
-| Pinecone | $0 | Free tier covers ~100k vectors |
-| Email | $0 | Gmail SMTP is free |
-| Notion | $0 | Free tier covers 1000 blocks/month |
-| **Total** | **$0** | ✅ Completely free! |
-
-Compare to:
-- **Otter.ai**: $10-25/month
-- **Rev**: $0.25-1/minute transcription
-- **Fireflies.ai**: $10-50/month
-- **Kontext**: $0 (self-hosted)
-
-## Contributing 🤝
+## Contributing
 
 Contributions welcome! Please:
 
 1. Fork the repository
-2. Create feature branch: `git checkout -b feature/amazing-feature`
-3. Commit changes: `git commit -m 'Add amazing feature'`
-4. Push to branch: `git push origin feature/amazing-feature`
-5. Open Pull Request
-
-## License 📄
-
-MIT License - see LICENSE file for details
-
-## Support 💬
-
-- **Issues**: GitHub Issues
-- **Discussions**: GitHub Discussions
-- **Email**: support@kontext.local
-
-## Why I Built This 🎯
-
-I attend multiple meetings daily at Payvite and other commitments. Traditional meeting assistants are expensive and lock data behind paywalls. I wanted:
-
-- ✅ **Privacy**: All data stays on my server
-- ✅ **Cost**: No monthly subscriptions
-- ✅ **Control**: Integrate with our tools (Notion, email)
-- ✅ **Simplicity**: One-click to start recording
-- ✅ **Extensibility**: Add new integrations easily
-
-So I built Kontext — and it's been a game-changer for team documentation. Maybe it'll help you too!
+2. Create a feature branch
+3. Make your changes
+4. Test thoroughly
+5. Submit a pull request
 
 ---
 
-**Built with ❤️ by Payvite team**
+## License
 
-Questions? Open an issue or reach out!
+MIT License
+
+---
+
+
+---
+
