@@ -1,0 +1,20 @@
+fastapi
+uvicorn[standard]
+websockets
+pydantic-settings
+aiosqlite
+ranscription
+faster-whisper
+sounddevice
+numpy
+groq
+sentence-transformers
+pinecone-client
+notion-client
+streamlit
+requests
+python-dotenv
+python-multipart
+colorlog
+
+#pywin32==306; sys_platform == 'win32'

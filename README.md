@@ -2,42 +2,35 @@
 
 Real-time meeting transcription, summarization, and integration platform powered by AI.
 
+Kontext is a self-hosted meeting assistant that captures audio from your microphone, transcribes it in real-time using OpenAI's Whisper, generates intelligent summaries with Groq's LLMs, and automatically sends them to email, Notion on request, or stores them locally.
 
-| Feature | Batch Mode | Streaming Mode |
-|---------|-----------|-----------------|
-| **Latency** | 30-60 seconds | 100-300ms |
-| **Speed** | 📦 Batch processing | ⚡ Real-time |
-| **Memory** | 2-3GB | 500-800MB |
-| **First Word** | After 30-60s | Instant |
-| **Summaries** | Every 10 minutes | Every 1 minute |
-| **API** | Local Whisper | Groq Streaming |
 
 **Enable streaming:** Set `ENABLE_STREAMING=true` in `.env`
 
----
+- **🎙️ Real-time Audio Capture**: WebRTC-based audio streaming from browser to backend
+- **📝 Transcription**: Streaming transcription using faster-Whisper (CPU-friendly)
+- **✂️ Smart Summaries**: Automatic meeting summaries with key points, decisions, and action items
+- **📧 Email Integration**: Send meeting summaries directly to team members via email
+- **📘 Notion Integration**: Push summaries to Notion databases for team documentation
+- **🔍 RAG Search**: Query meeting content using semantic search with Pinecone
+- **💬 Post-Meeting Chat**: Ask questions about meetings after they end
+- **📊 Local Storage**: SQLite database keeps all data on your server
+- **🚀 Docker Ready**: One-command deployment with Docker Compose
 
 ## Features
 
-✨ **Core Capabilities**
-- 🎙️ Real-time audio transcription (local Whisper or Groq streaming API)
-- 📝 Intelligent meeting summaries (updated every 1-10 minutes)
-- 📧 Automatic email delivery of transcripts and summaries
-- 📔 Notion integration (save summaries to Notion database)
-- 🌐 Web UI for meeting recording and playback
-- 💾 Persistent storage of meeting history
+| Component | Technology | Purpose |
+|-----------|-----------|---------|
+| **Backend** | FastAPI + Uvicorn | Real-time WebSocket streaming |
+| **Speech-to-Text** | faster-Whisper (base/medium) | CPU-efficient transcription |
+| **Summarization** | Groq API (Llama 70B) | High-quality meeting summaries |
+| **Embeddings** | Sentence-Transformers | Semantic search for meeting content |
+| **Vector DB** | Pinecone | Store and query meeting embeddings |
+| **Frontend** | Vanilla JavaScript + HTML | Lightweight, no frameworks |
+| **Database** | SQLite | Local persistent storage |
+| **Email** | SMTP (Gmail) | Send summaries to team |
+| **Notion API** | Official Python Client | Push to shared Notion databases |
 
-🚀 **Performance** (Streaming Mode)
-- 100-300ms latency (100x faster than batch)
-- Real-time partial transcripts
-- Live captions with interim results
-- Automatic API fallback to batch mode
-
-🔧 **Developer Friendly**
-- WebSocket streaming for real-time updates
-- FastAPI backend with async support
-- Docker & docker-compose ready
-- Single toggle for batch/streaming mode
-- Comprehensive logging
 
 ---
 
@@ -250,77 +243,13 @@ UI (real-time captions) → Database
 Summarizer (1-min interval) → Email/Notion
 ```
 
----
-
 
 ---
 
-## Deployment
-
-### Docker Compose (Recommended)
-
-```bash
-# Build and start
-docker-compose up -d
-
-# View logs
-docker logs -f kontext-meeting-agent
-
-# Stop
-docker-compose down
 ```
 
-### Docker Only
 
-```bash
-# Build image
-docker build -t kontext-agent .
 
-# Run container
-docker run -d \
-  -p 8000:8000 \
-  -e GROQ_API_KEY=your_key \
-  -e ENABLE_STREAMING=true \
-  -v ./data:/app/data \
-  kontext-agent
-```
-
-### Local Development
-
-```bash
-# Install dependencies
-pip install -r requirements.txt
-
-# Set environment variables
-export GROQ_API_KEY=your_key
-export ENABLE_STREAMING=true
-
-# Run server
-python start_server.py
-
-# Access at http://localhost:8000
-```
-
----
-
-## Troubleshooting
-
-### Streaming transcription not working
-
-**Problem**: Transcripts not appearing in real-time
-**Solution**:
-1. Verify Groq API key: `echo $GROQ_API_KEY` (should show your key)
-2. Check browser console for `TRANSCRIPT_PARTIAL` messages
-3. Ensure WebSocket connection is open: check DevTools → Network → WS
-4. Fallback to batch mode: set `ENABLE_STREAMING=false`
-
-### High memory usage
-
-**Problem**: Memory spike to 2-3GB
-**Solution**:
-- This is batch mode behavior (streaming uses 500-800MB)
-- To enable streaming: set `ENABLE_STREAMING=true` and add `GROQ_API_KEY`
-- Restart container: `docker-compose restart`
 
 
 
@@ -362,61 +291,36 @@ Kontext-Agent/
 └── README.md
 ```
 
----
 
-## API Reference
 
-### WebSocket Events
 
-#### Client → Server
 
-```javascript
-// Start meeting
-{ type: "START_MEETING", data: { meeting_id: "...", title: "..." } }
-
-// Audio frame (16ms)
-{ type: "AUDIO_FRAME", data: { audio: Uint8Array, ... } }
-
-// Stop meeting
-{ type: "STOP_MEETING", data: {} }
-```
-
-#### Server → Client
-
-```javascript
-// Interim transcript
-{ type: "TRANSCRIPT_PARTIAL", data: { text: "...", is_final: false } }
-
-// Final transcript
-{ type: "TRANSCRIPT_UPDATE", data: { text: "...", is_final: true } }
-
-// Summary update
-{ type: "SUMMARY_UPDATE", data: { summary: "..." } }
-
-// Status
-{ type: "STATUS", data: { status: "recording" | "idle" } }
-```
-
----
-
-## Contributing
+## Contributing 🤝
 
 Contributions welcome! Please:
 
 1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Test thoroughly
-5. Submit a pull request
+2. Create feature branch: `git checkout -b feature/amazing-feature`
+3. Commit changes: `git commit -m 'Add amazing feature'`
+4. Push to branch: `git push origin feature/amazing-feature`
+5. Open Pull Request
+
+
+
+- **Email**: funboy.ea@gmail.com
+
+## Why I Built This 🎯
+
+I attend multiple meetings daily at Payvite and other commitments. Traditional meeting assistants are expensive. I wanted:
+
+- ✅ **Privacy**: All data stays on my server
+- ✅ **Cost**: No monthly subscriptions
+- ✅ **Control**: Integrate with our tools (Notion, email)
+- ✅ **Simplicity**: One-click to start recording
+- ✅ **Extensibility**: Add new integrations easily
+
+ Maybe it'll help you too!
 
 ---
 
-## License
-
-MIT License
-
----
-
-
----
 
