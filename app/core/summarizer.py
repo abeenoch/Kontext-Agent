@@ -93,6 +93,18 @@ Brief summary:"""
                 "action_items": []
             }
         
+        # Truncate transcript to avoid token limit (Groq free tier: 8000 TPM)
+        # Roughly 1 token = 4 characters, so 8000 tokens ≈ 32k chars
+        # Leave room for prompt overhead and response, use 20k char limit
+        max_chars = 20000
+        if len(transcript) > max_chars:
+            logger.info(f"Truncating transcript from {len(transcript)} to {max_chars} chars for summarization")
+            # Keep first 30% and last 70% to preserve context and recent discussion
+            keep_first = max_chars // 3
+            keep_last = (max_chars * 2) // 3
+            truncated = transcript[:keep_first] + "\n[...middle section omitted...]\n" + transcript[-keep_last:]
+            transcript = truncated
+        
         prompt = f"""You are a professional meeting summarizer. Analyze this meeting transcript and provide a structured summary.
 
 Transcript:

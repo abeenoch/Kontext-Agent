@@ -232,8 +232,16 @@ class MeetingWebSocketHandler:
             chunk_duration = bytes_processed / (settings.SAMPLE_RATE * 2)
             logger.info(f"[STOP] Progressive chunk {chunk_count + 1}: transcribing {chunk_duration:.1f}s")
             
-            # Transcribe this chunk
-            final_text = await transcriber.transcribe_final(audio_np)
+            # Use streaming transcriber for faster processing on STOP
+            if settings.ENABLE_STREAMING:
+                logger.debug(f"[STOP] Using streaming transcriber for chunk {chunk_count + 1}")
+                final_text = ""
+                async for result in streaming_transcriber.transcribe_streaming(audio_np):
+                    if result.is_final:
+                        final_text = result.text
+            else:
+                # Fallback to batch transcriber
+                final_text = await transcriber.transcribe_final(audio_np)
             
             # Mark as processed BEFORE saving (in case of errors)
             self.audio_buffer.mark_processed(bytes_processed)
@@ -253,7 +261,15 @@ class MeetingWebSocketHandler:
             logger.info(f"[STOP] Final tail chunk: {remaining_duration:.1f}s")
             
             if self.validator.validate_audio_array(remaining_audio):
-                final_text = await transcriber.transcribe_final(remaining_audio)
+                # Use streaming for tail chunk too
+                if settings.ENABLE_STREAMING:
+                    final_text = ""
+                    async for result in streaming_transcriber.transcribe_streaming(remaining_audio):
+                        if result.is_final:
+                            final_text = result.text
+                else:
+                    final_text = await transcriber.transcribe_final(remaining_audio)
+                
                 if final_text:
                     await db.add_transcript(self.meeting_id, final_text)
                     logger.info(f"[STOP] Final tail: {len(final_text)} chars")
