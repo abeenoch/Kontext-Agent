@@ -1,4 +1,4 @@
-# Kontext Meeting Agent 🎙️
+# Kontext Meeting Agent 
 
 Real-time meeting transcription, summarization, and integration platform powered by AI.
 
@@ -7,15 +7,15 @@ Kontext is a self-hosted meeting assistant that captures audio from your microph
 
 **Enable streaming:** Set `ENABLE_STREAMING=true` in `.env`
 
-- **🎙️ Real-time Audio Capture**: WebRTC-based audio streaming from browser to backend
-- **📝 Transcription**: Streaming transcription using faster-Whisper (CPU-friendly)
-- **✂️ Smart Summaries**: Automatic meeting summaries with key points, decisions, and action items
-- **📧 Email Integration**: Send meeting summaries directly to team members via email
-- **📘 Notion Integration**: Push summaries to Notion databases for team documentation
-- **🔍 RAG Search**: Query meeting content using semantic search with Pinecone
-- **💬 Post-Meeting Chat**: Ask questions about meetings after they end
-- **📊 Local Storage**: SQLite database keeps all data on your server
-- **🚀 Docker Ready**: One-command deployment with Docker Compose
+- **Real-time Audio Capture**: WebRTC-based audio streaming from browser to backend
+- ** Transcription**: Streaming transcription using faster-Whisper (CPU-friendly)
+- **Smart Summaries**: Automatic meeting summaries with key points, decisions, and action items
+- ** Email Integration**: Send meeting summaries directly to team members via email
+- **Notion Integration**: Push summaries to Notion databases for team documentation
+- ** RAG Search**: Query meeting content using semantic search with Pinecone
+- **Post-Meeting Chat**: Ask questions about meetings after they end
+- **Local Storage**: SQLite database keeps all data on your server
+- ** Docker Ready**: One-command deployment with Docker Compose
 
 ## Features
 
@@ -295,7 +295,7 @@ Kontext-Agent/
 
 
 
-## Contributing 🤝
+## Contributing 
 
 Contributions welcome! Please:
 
@@ -309,15 +309,15 @@ Contributions welcome! Please:
 
 - **Email**: funboy.ea@gmail.com
 
-## Why I Built This 🎯
+## Why I Built This 
 
 I attend multiple meetings daily at Payvite and other commitments. Traditional meeting assistants are expensive. I wanted:
 
-- ✅ **Privacy**: All data stays on my server
-- ✅ **Cost**: No monthly subscriptions
-- ✅ **Control**: Integrate with our tools (Notion, email)
-- ✅ **Simplicity**: One-click to start recording
-- ✅ **Extensibility**: Add new integrations easily
+- **Privacy**: All data stays on my server
+- **Cost**: No monthly subscriptions
+- **Control**: Integrate with our tools (Notion, email)
+- **Simplicity**: One-click to start recording
+- **Extensibility**: Add new integrations easily
 
  Maybe it'll help you too!
 
