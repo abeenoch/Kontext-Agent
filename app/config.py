@@ -1,81 +1,86 @@
-from pydantic_settings import BaseSettings
-from typing import Optional
+"""Application settings from environment variables."""
+
 import os
+from functools import lru_cache
+
+from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):
-    """Application settings loaded from environment variables."""
-    
-    # Server
-    HOST: str = "0.0.0.0"
-    PORT: int = 8000
-    LOG_LEVEL: str = "INFO"
-    ALLOWED_ORIGINS: str = "http://localhost:8501,http://localhost:3000"
-    
-    # Database
-    DB_PATH: str = "./data/meetings.db"
-    
-    # Whisper
-    WHISPER_MODEL: str = "base"
-    WHISPER_DEVICE: str = "cpu"
-    WHISPER_COMPUTE_TYPE: str = "int8"
-    
-    # LLM (Optional - summarization will gracefully degrade without it)
-    GROQ_API_KEY: Optional[str] = None
-    GROQ_MODEL: str = "llama-3.1-70b-preview"
-    
-    # Pinecone (Optional - RAG indexing will gracefully fail without it)
-    PINECONE_API_KEY: Optional[str] = None
-    PINECONE_ENVIRONMENT: str = "us-east-1-aws"
-    PINECONE_INDEX_NAME: str = "meeting-agent"
-    
-    # Email (Optional - email functionality will gracefully fail without it)
-    SMTP_HOST: str = "smtp.gmail.com"
-    SMTP_PORT: int = 587
-    SMTP_USER: Optional[str] = None
-    SMTP_PASSWORD: Optional[str] = None
-    SMTP_FROM_EMAIL: Optional[str] = None
-    SMTP_USE_TLS: bool = True
-    
-    # Notion (Optional)
-    NOTION_API_KEY: Optional[str] = None
-    NOTION_DATABASE_ID: Optional[str] = None
-    
-    # Audio Processing
-    SAMPLE_RATE: int = 16000
-    AUDIO_CHANNELS: int = 1
-    CHUNK_DURATION_MS: int = 500
-    TRANSCRIPTION_WINDOW_SEC: int = 60 
-    SUMMARY_INTERVAL_MIN: int = 10
-    MIN_AUDIO_DURATION_SEC: int = 10
-    
-    # Streaming Mode
-    ENABLE_STREAMING: bool = True  # Use Groq streaming API for real-time transcription
-    STREAMING_PARTIAL_UPDATE_INTERVAL_MS: int = 100  # Update UI every 100-300ms with partial results
-    FRAME_SIZE_MS: int = 20  # Send 20ms audio frames for streaming (was 500ms chunks)
-    STREAMING_SUMMARY_INTERVAL_MIN: int = 0  # Summary interval in streaming mode (0 = every 30s, overrides SUMMARY_INTERVAL_MIN)
-    
-    # FFmpeg (optional)
-    FFMPEG_PATH: Optional[str] = None
-    
-    class Config:
-        env_file = ".env"
-        case_sensitive = True
-    
-    @property
-    def allowed_origins_list(self) -> list[str]:
-        """Parse comma-separated origins."""
-        return [origin.strip() for origin in self.ALLOWED_ORIGINS.split(",")]
-    
-    @property
-    def summary_interval_seconds(self) -> int:
-        """Convert summary interval to seconds."""
-        return self.SUMMARY_INTERVAL_MIN * 60
-    
-    @property
-    def chunk_size_bytes(self) -> int:
-        """Calculate audio chunk size in bytes (PCM S16LE)."""
-        return self.SAMPLE_RATE * self.AUDIO_CHANNELS * 2 * self.CHUNK_DURATION_MS // 1000
+    """Application settings loaded from environment variables and .env file."""
+
+    # -- Server -------------------------------------------------------------------
+    app_host: str = os.getenv("APP_HOST", "0.0.0.0")
+    app_port: int = int(os.getenv("APP_PORT", "8000"))
+
+    # -- Database -----------------------------------------------------------------
+    chat_db_path: str = os.getenv("CHAT_DB_PATH", "./chat_memory.db")
+    chroma_dir: str = os.getenv("CHROMA_DIR", "./chroma_db")
+
+    # -- File Storage -------------------------------------------------------------
+    transcripts_dir: str = os.getenv("TRANSCRIPTS_DIR", "data/meeting_transcripts")
+
+    # -- LLM (Groq) ---------------------------------------------------------------
+    groq_api_key: str = os.getenv("GROQ_API_KEY", "")
+    groq_url: str = "https://api.groq.com/openai/v1/chat/completions"
+    groq_model: str = os.getenv("GROQ_MODEL", "openai/gpt-oss-120b")
+    llm_temperature: float = float(os.getenv("LLM_TEMPERATURE", "0.7"))
+    llm_timeout: float = float(os.getenv("LLM_TIMEOUT", "30.0"))
+
+    # -- Deepgram -----------------------------------------------------------------
+    deepgram_api_key: str = os.getenv("DEEPGRAM_API_KEY", "")
+    deepgram_model: str = os.getenv("DEEPGRAM_MODEL", "nova-3")
+    deepgram_language: str = os.getenv("DEEPGRAM_LANGUAGE", "en")
+    deepgram_tts_model: str = os.getenv("DEEPGRAM_TTS_MODEL", "aura-2-thalia-en")
+    deepgram_interim_results: bool = (
+        os.getenv("DEEPGRAM_INTERIM_RESULTS", "true").lower() == "true"
+    )
+    deepgram_punctuate: bool = (
+        os.getenv("DEEPGRAM_PUNCTUATE", "true").lower() == "true"
+    )
+    deepgram_diarize: bool = (
+        os.getenv("DEEPGRAM_DIARIZE", "true").lower() == "true"
+    )
+    deepgram_smart_format: bool = (
+        os.getenv("DEEPGRAM_SMART_FORMAT", "true").lower() == "true"
+    )
+
+    # -- Embeddings ---------------------------------------------------------------
+    embedding_model: str = os.getenv("EMBEDDING_MODEL", "all-MiniLM-L6-v2")
+
+    # -- Text Processing ----------------------------------------------------------
+    chunk_size: int = int(os.getenv("CHUNK_SIZE", "800"))
+    chunk_overlap: int = int(os.getenv("CHUNK_OVERLAP", "100"))
+
+    # -- WebSocket ----------------------------------------------------------------
+    websocket_timeout: float = float(os.getenv("WEBSOCKET_TIMEOUT", "300.0"))
+
+    # -- Email (SMTP) -------------------------------------------------------------
+    smtp_host: str = os.getenv("SMTP_HOST", "smtp.gmail.com")
+    smtp_port: int = int(os.getenv("SMTP_PORT", "587"))
+    smtp_user: str = os.getenv("SMTP_USER", "")
+    smtp_pass: str = os.getenv("SMTP_PASS", "")
+
+    # -- Notion -------------------------------------------------------------------
+    notion_token: str = os.getenv("NOTION_TOKEN", "")
+    notion_page_id: str = os.getenv("NOTION_PAGE_ID", "")
+
+    # -- Security -----------------------------------------------------------------
+    jwt_secret: str = os.getenv("JWT_SECRET", "your-secret-key-change-in-production")
+    jwt_algorithm: str = "HS256"
+    jwt_expiry_hours: int = int(os.getenv("JWT_EXPIRY_HOURS", "24"))
+
+    # -- Rate Limiting ------------------------------------------------------------
+    rate_limit_requests: int = int(os.getenv("RATE_LIMIT_REQUESTS", "100"))
+    rate_limit_period: int = int(os.getenv("RATE_LIMIT_PERIOD", "60"))
+
+    # -- Logging ------------------------------------------------------------------
+    log_level: str = os.getenv("LOG_LEVEL", "INFO")
+
+    model_config = {"env_file": ".env", "case_sensitive": False, "extra": "ignore"}
 
 
-settings = Settings()
+@lru_cache()
+def get_settings() -> Settings:
+    """Return a cached Settings instance."""
+    return Settings()

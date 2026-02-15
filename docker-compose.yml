@@ -1,60 +1,41 @@
-version: '3.8'
-
 services:
-  meeting-agent:
+  backend:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: kontext-meeting-agent
-    ports:
-      - "8000:8000"
+    container_name: kontext-backend
     env_file:
       - .env
     environment:
-      # Production settings
-      - HOST=0.0.0.0
-      - PORT=8000
-      - LOG_LEVEL=INFO
-      - DB_PATH=/app/data/meetings.db
-      
-      # Streaming mode (enabled by default)
-      - ENABLE_STREAMING=true
-      
-      # IMPORTANT: Set GROQ_API_KEY in .env file for streaming to work
-      # Get free API key from https://console.groq.com/keys
-      # Example in .env: GROQ_API_KEY=your_groq_api_key_here
-      
-      # Audio streaming configuration
-      - FRAME_SIZE_MS=20              # 20ms frames for real-time streaming (instead of 500ms chunks)
-      - STREAMING_PARTIAL_UPDATE_INTERVAL_MS=100  # Update UI every 100-300ms with partial results
-      - SUMMARY_INTERVAL_MIN=1        # Real-time summaries every 1 minute (was 10 min in batch mode)
+      APP_HOST: 0.0.0.0
+      APP_PORT: 8000
+      CHROMA_DIR: /app/chroma_db
+      TRANSCRIPTS_DIR: /app/data/meeting_transcripts
+    ports:
+      - "8000:8000"
     volumes:
-      - ./data:/app/data              # Persistent meeting data and transcripts
-      - ./logs:/app/logs              # Persistent logs for debugging
-    restart: unless-stopped
-    
-    # Extended health check for streaming connections
+      - ./data:/app/data
+      - ./chroma_db:/app/chroma_db
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 60s  # Wait for Whisper model to load
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "10m"
-        max-file: "3"
-    
-    networks:
-      - meeting-agent-network
+      test: ["CMD", "curl", "-fsS", "http://localhost:8000/health"]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
 
-networks:
-  meeting-agent-network:
-    driver: bridge
-
-volumes:
-  data:
-    driver: local
-  logs:
-    driver: local
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: kontext-frontend
+    depends_on:
+      backend:
+        condition: service_healthy
+    environment:
+      VITE_API_BASE_URL: http://localhost:8000
+      VITE_WS_URL: ws://localhost:8000
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules

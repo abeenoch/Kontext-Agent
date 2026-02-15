@@ -1,0 +1,106 @@
+"""Async LLM agent service for querying Groq API."""
+
+import httpx
+
+from app.config import get_settings
+from app.logger import get_logger
+
+logger = get_logger(__name__)
+settings = get_settings()
+
+# Reusable async client -- created once, shared across requests.
+_http_client: httpx.AsyncClient | None = None
+
+
+def _get_http_client() -> httpx.AsyncClient:
+    """Return a module-level async HTTP client (lazy singleton)."""
+    global _http_client
+    if _http_client is None:
+        _http_client = httpx.AsyncClient(timeout=settings.llm_timeout)
+    return _http_client
+
+
+async def query_llm(prompt: str, max_retries: int = 3) -> str:
+    """
+    Query the Groq LLM with retry logic.
+
+    Args:
+        prompt: The user/system prompt text.
+        max_retries: Number of retry attempts on transient failures.
+
+    Returns:
+        The LLM response text.
+
+    Raises:
+        ValueError: If the API key is missing or prompt is empty.
+        RuntimeError: If all retries are exhausted.
+    """
+    if not settings.groq_api_key:
+        raise ValueError("GROQ_API_KEY environment variable not set")
+    
+    # Masked key for diagnostic: gsk_...XXXX
+    masked_key = f"{settings.groq_api_key[:7]}...{settings.groq_api_key[-4:]}" if len(settings.groq_api_key) > 15 else "***"
+    logger.info("Using Groq API Key: %s (len=%d)", masked_key, len(settings.groq_api_key))
+
+    if not prompt or not prompt.strip():
+        logger.warning("Empty prompt provided to LLM")
+        return ""
+
+    headers = {
+        "Authorization": f"Bearer {settings.groq_api_key.strip()}",
+        "Content-Type": "application/json",
+    }
+
+    payload = {
+        "model": settings.groq_model,
+        "messages": [{"role": "user", "content": prompt}],
+        "temperature": settings.llm_temperature,
+    }
+
+    client = _get_http_client()
+    last_exc: Exception | None = None
+
+    for attempt in range(1, max_retries + 1):
+        try:
+            logger.debug("Querying LLM (attempt %d/%d)", attempt, max_retries)
+
+            response = await client.post(
+                settings.groq_url,
+                headers=headers,
+                json=payload,
+            )
+            response.raise_for_status()
+            data = response.json()
+
+            choices = data.get("choices", [])
+            if not choices:
+                raise ValueError(f"Unexpected LLM response format: {data}")
+
+            result = choices[0]["message"]["content"]
+            logger.debug("LLM response received (%d chars)", len(result))
+            return result
+
+        except httpx.TimeoutException:
+            logger.warning("LLM request timeout (attempt %d/%d)", attempt, max_retries)
+            last_exc = TimeoutError("LLM request timed out")
+
+        except httpx.HTTPStatusError as exc:
+            status_code = exc.response.status_code
+            if status_code == 429:
+                logger.warning(
+                    "LLM rate limited (attempt %d/%d)", attempt, max_retries
+                )
+                last_exc = exc
+            else:
+                logger.error(
+                    "LLM HTTP error: %d - %s",
+                    status_code,
+                    exc.response.text,
+                )
+                raise
+
+        except Exception as exc:
+            logger.error("Unexpected error querying LLM: %s", exc)
+            raise
+
+    raise RuntimeError(f"Failed to query LLM after {max_retries} retries: {last_exc}")

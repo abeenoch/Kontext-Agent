@@ -1,134 +1,85 @@
-import logging
-from contextlib import asynccontextmanager
-from fastapi import FastAPI, WebSocket
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
-from app.config import settings
-from app.database import db
-from app.api.routes import router as api_router
-from app.api.websocket import meeting_websocket_endpoint
-from app.core.transcriber import transcriber
-from app.services.streaming_transcriber import streaming_transcriber
+"""
+Kontext Agent -- main application entry point.
 
-# Configure logging
-logging.basicConfig(
-    level=getattr(logging, settings.LOG_LEVEL),
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger(__name__)
+AI-powered voice and document assistant with real-time transcription,
+meeting summarization, and RAG-based document chat.
+"""
+
+from contextlib import asynccontextmanager
+
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+
+from app.services.chat_memory import init_db
+from app.config import get_settings
+from app.logger import get_logger
+
+logger = get_logger(__name__)
+settings = get_settings()
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI):
-    """Application lifespan manager."""
-    # Startup
-    logger.info("Starting Meeting Agent API...")
-    await db.init_schema()
-    logger.info(f"Database initialized at {settings.DB_PATH}")
-    
-    # Preload Whisper model
-    logger.info("Preloading Whisper model...")
-    await transcriber.initialize()
-    logger.info("Whisper model loaded successfully")
-    
-    # Initialize streaming transcriber (Groq API)
-    if settings.ENABLE_STREAMING:
-        logger.info("Initializing Groq streaming transcriber...")
-        await streaming_transcriber.initialize()
-        logger.info("Groq streaming transcriber initialized")
-    
+async def lifespan(application: FastAPI):
+    """Application startup and shutdown lifecycle."""
+    logger.info("Starting Kontext Agent v4.0.0")
+    await init_db()
+    logger.info("Database initialized")
     yield
-    
-    # Shutdown
-    logger.info("Shutting down Meeting Agent API...")
-    await db.close()
-    await streaming_transcriber.close()
+    logger.info("Shutting down Kontext Agent")
 
 
-# Create FastAPI app
 app = FastAPI(
-    title="Meeting Agent API",
-    description="Real-time meeting recording, transcription, and AI chat system",
-    version="1.0.0",
-    lifespan=lifespan
+    title="Kontext Agent",
+    version="4.0.0",
+    description=(
+        "AI-powered voice and document assistant with real-time transcription, "
+        "meeting summarization, and RAG-based document chat."
+    ),
+    lifespan=lifespan,
 )
 
-# CORS middleware
+
+# -- CORS ---------------------------------------------------------------------
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.ALLOWED_ORIGINS.split(","),
+    allow_origins=["*"],  # restrict in production
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 
-#
-# HTTP REST API routes
-app.include_router(api_router)
+# -- Routers ------------------------------------------------------------------
+
+from app.routes.auth import router as auth_router
+from app.routes.chat import router as chat_router
+from app.routes.docs import router as docs_router
+from app.routes.meeting import router as meeting_router
+from app.routes.voice_chat import router as voice_chat_router
+
+app.include_router(auth_router)
+app.include_router(chat_router)
+app.include_router(docs_router)
+app.include_router(meeting_router)
+app.include_router(voice_chat_router)
 
 
+# -- Health / Root -------------------------------------------------------------
 
-@app.websocket("/ws/meeting")
-async def websocket_meeting(websocket: WebSocket):
-    """WebSocket endpoint for meeting audio streaming."""
-    await meeting_websocket_endpoint(websocket)
-
-
-# 
-
-
-from fastapi.responses import FileResponse
-from pathlib import Path
 
 @app.get("/")
 async def root():
-    """Serve HTML UI."""
-    ui_path = Path(__file__).parent / "ui" / "index.html"
-    if ui_path.exists():
-        return FileResponse(ui_path)
-    else:
-        return {
-            "service": "Meeting Agent API",
-            "version": "1.0.0",
-            "status": "running",
-            "endpoints": {
-                "websocket": "/ws/meeting",
-                "api": "/api",
-                "docs": "/docs"
-            }
-        }
-
-@app.get("/health")
-async def health_check():
-    """Health check endpoint."""
+    """API health check endpoint."""
     return {
-        "status": "healthy",
-        "database": "connected"
+        "name": "Kontext Agent",
+        "version": "4.0.0",
+        "status": "running",
+        "docs": "/docs",
     }
 
 
-
-@app.exception_handler(Exception)
-async def global_exception_handler(request, exc):
-    """Global exception handler."""
-    logger.error(f"Unhandled exception: {exc}", exc_info=True)
-    return JSONResponse(
-        status_code=500,
-        content={
-            "error": "Internal server error",
-            "detail": str(exc)
-        }
-    )
-
-
-if __name__ == "__main__":
-    import uvicorn
-    
-    uvicorn.run(
-        "app.main:app",
-        host=settings.HOST,
-        port=settings.PORT,
-        reload=True,
-        log_level=settings.LOG_LEVEL.lower()
-    )
+@app.get("/health")
+async def health():
+    """Health check endpoint."""
+    return {"status": "ok"}
