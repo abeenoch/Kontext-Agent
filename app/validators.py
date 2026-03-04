@@ -63,3 +63,17 @@ def sanitize_html(text: str) -> str:
     text = re.sub(r"<script[^>]*>.*?</script>", "", text, flags=re.IGNORECASE | re.DOTALL)
     text = re.sub(r"on\w+\s*=", "", text, flags=re.IGNORECASE)
     return text
+
+
+def validate_meeting_id(meeting_id: str) -> str:
+    """
+    Validate meeting_id for safe use in DB keys and filenames.
+
+    Allows 8-64 chars from [A-Za-z0-9_-].
+    """
+    if not re.fullmatch(r"[A-Za-z0-9_-]{8,64}", meeting_id):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid meeting_id format",
+        )
+    return meeting_id

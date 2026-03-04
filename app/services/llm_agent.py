@@ -20,7 +20,11 @@ def _get_http_client() -> httpx.AsyncClient:
     return _http_client
 
 
-async def query_llm(prompt: str, max_retries: int = 3) -> str:
+async def query_llm(
+    prompt: str,
+    max_retries: int = 3,
+    temperature: float | None = None,
+) -> str:
     """
     Query the Groq LLM with retry logic.
 
@@ -54,7 +58,7 @@ async def query_llm(prompt: str, max_retries: int = 3) -> str:
     payload = {
         "model": settings.groq_model,
         "messages": [{"role": "user", "content": prompt}],
-        "temperature": settings.llm_temperature,
+        "temperature": settings.llm_temperature if temperature is None else temperature,
     }
 
     client = _get_http_client()

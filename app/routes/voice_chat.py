@@ -3,6 +3,7 @@ import base64
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
+from app.auth import get_current_user_ws
 from app.services.deepgram import DeepgramSTTHandler, TranscriptResult, get_tts_service
 from app.services.audio import process_browser_audio
 from app.services.llm_agent import query_llm
@@ -25,10 +26,9 @@ async def voice_chat_websocket(websocket: WebSocket) -> None:
     - Server transcribes via Deepgram, generates LLM response, synthesizes TTS.
     - Server sends back JSON messages with transcript, LLM response, and audio.
     """
+    user_id = await get_current_user_ws(websocket)
     await websocket.accept()
-    logger.info("Voice chat session started")
-
-    user_id = websocket.query_params.get("user_id", "anonymous")
+    logger.info("Voice chat session started for user")
     deepgram_handler: DeepgramSTTHandler | None = None
     conversation_history: list[dict[str, str]] = []
     keepalive_task: asyncio.Task | None = None

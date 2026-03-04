@@ -12,6 +12,7 @@ class Settings(BaseSettings):
     # -- Server -------------------------------------------------------------------
     app_host: str = os.getenv("APP_HOST", "0.0.0.0")
     app_port: int = int(os.getenv("APP_PORT", "8000"))
+    app_env: str = os.getenv("APP_ENV", "development").lower()
 
     # -- Database -----------------------------------------------------------------
     chat_db_path: str = os.getenv("CHAT_DB_PATH", "./chat_memory.db")
@@ -69,6 +70,10 @@ class Settings(BaseSettings):
     jwt_secret: str = os.getenv("JWT_SECRET", "your-secret-key-change-in-production")
     jwt_algorithm: str = "HS256"
     jwt_expiry_hours: int = int(os.getenv("JWT_EXPIRY_HOURS", "24"))
+    cors_origins: str = os.getenv(
+        "CORS_ORIGINS",
+        "http://localhost:5173,http://127.0.0.1:5173",
+    )
 
     # -- Rate Limiting ------------------------------------------------------------
     rate_limit_requests: int = int(os.getenv("RATE_LIMIT_REQUESTS", "100"))
@@ -78,6 +83,30 @@ class Settings(BaseSettings):
     log_level: str = os.getenv("LOG_LEVEL", "INFO")
 
     model_config = {"env_file": ".env", "case_sensitive": False, "extra": "ignore"}
+
+    def get_cors_origins(self) -> list[str]:
+        """Parse CORS origins from comma-separated env value."""
+        return [origin.strip() for origin in self.cors_origins.split(",") if origin.strip()]
+
+    def validate_security(self) -> None:
+        """
+        Validate security-sensitive settings.
+
+        In production, reject known-weak JWT secrets.
+        """
+        if self.app_env != "production":
+            return
+
+        weak_default = "your-secret-key-change-in-production"
+        if self.jwt_secret == weak_default or len(self.jwt_secret) < 32:
+            raise RuntimeError(
+                "Unsafe JWT_SECRET for production. Set a strong random secret (>=32 chars)."
+            )
+
+        if "*" in self.get_cors_origins():
+            raise RuntimeError(
+                "Unsafe CORS_ORIGINS for production. Use explicit trusted origins."
+            )
 
 
 @lru_cache()

@@ -90,11 +90,19 @@ export function useWebSocket(url, onMessage) {
         setIsConnected(false);
     }, []);
 
+    const disableReconnect = useCallback(() => {
+        shouldReconnectRef.current = false;
+        if (reconnectTimerRef.current) {
+            clearTimeout(reconnectTimerRef.current);
+            reconnectTimerRef.current = null;
+        }
+    }, []);
+
     useEffect(() => {
         return () => {
             disconnect();
         };
     }, [disconnect]);
 
-    return { isConnected, error, connect, disconnect, sendMessage };
+    return { isConnected, error, connect, disconnect, disableReconnect, sendMessage };
 }

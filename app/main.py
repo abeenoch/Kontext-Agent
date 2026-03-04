@@ -16,6 +16,7 @@ from app.logger import get_logger
 
 logger = get_logger(__name__)
 settings = get_settings()
+settings.validate_security()
 
 
 @asynccontextmanager
@@ -43,7 +44,7 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # restrict in production
+    allow_origins=settings.get_cors_origins(),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

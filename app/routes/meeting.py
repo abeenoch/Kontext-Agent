@@ -10,6 +10,7 @@ import os
 import asyncio
 import json
 import re
+import hashlib
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect, status
@@ -33,9 +34,10 @@ from app.services.chat_memory import (
     get_meeting_transcript,
     list_meetings,
 )
-from app.auth import get_current_user
+from app.auth import get_current_user, get_current_user_ws
 from app.config import get_settings
 from app.logger import get_logger
+from app.validators import validate_meeting_id
 
 logger = get_logger(__name__)
 settings = get_settings()
@@ -103,16 +105,28 @@ class MeetingListItem(BaseModel):
 @router.websocket("/ws")
 async def meeting_websocket(websocket: WebSocket) -> None:
     """WebSocket endpoint for real-time meeting transcription with Deepgram."""
-    meeting_id = websocket.query_params.get("meeting_id", os.urandom(8).hex())
+    user_id = await get_current_user_ws(websocket)
+
+    requested_meeting_id = websocket.query_params.get("meeting_id")
+    if requested_meeting_id:
+        try:
+            meeting_id = validate_meeting_id(requested_meeting_id)
+        except HTTPException:
+            await websocket.close(code=1008)
+            return
+    else:
+        meeting_id = os.urandom(16).hex()
 
     await websocket.accept()
     logger.info("Meeting started: %s", meeting_id)
 
+    user_scope = hashlib.sha256(user_id.encode("utf-8")).hexdigest()[:12]
+
     transcript_path = os.path.join(
-        settings.transcripts_dir, f"transcript_{meeting_id}.txt"
+        settings.transcripts_dir, f"transcript_{user_scope}_{meeting_id}.txt"
     )
     summary_path = os.path.join(
-        settings.transcripts_dir, f"summary_{meeting_id}.txt"
+        settings.transcripts_dir, f"summary_{user_scope}_{meeting_id}.txt"
     )
 
     if not os.path.exists(transcript_path):
@@ -157,7 +171,11 @@ async def meeting_websocket(websocket: WebSocket) -> None:
                 await safe_send_json({"type": "interim", "text": result.text})
                 return
 
-            logger.info("Final utterance: %s", result.text)
+            logger.info(
+                "Final utterance captured for meeting=%s speaker=%s",
+                meeting_id,
+                result.speaker,
+            )
 
             transcript_line = (
                 f"[Speaker {result.speaker}] {result.text}"
@@ -170,7 +188,7 @@ async def meeting_websocket(websocket: WebSocket) -> None:
                 f.write(f"[{timestamp}] {transcript_line}\n")
 
             try:
-                await save_meeting_chunk(meeting_id, transcript_line)
+                await save_meeting_chunk(user_id, meeting_id, transcript_line)
             except Exception as exc:
                 logger.warning("Failed to save chunk to DB: %s", exc)
 
@@ -289,6 +307,15 @@ async def meeting_websocket(websocket: WebSocket) -> None:
             if text_data == "STOP":
                 logger.info("Meeting stopped: %s", meeting_id)
                 meeting_active = False
+
+                if summary_task:
+                    summary_task.cancel()
+                    try:
+                        await summary_task
+                    except asyncio.CancelledError:
+                        pass
+                    summary_task = None
+
                 await deepgram_handler.finish()
                 await safe_send_json(
                     {"type": "status", "message": "Generating final summary..."}
@@ -301,8 +328,11 @@ async def meeting_websocket(websocket: WebSocket) -> None:
 
                     if len(full_transcript.strip()) > 100:
                         summary_prompt = (
-                            "You are an expert meeting summarizer. Create a comprehensive final summary.\n\n"
-                            "Return Markdown with these sections:\n"
+                            "You are an expert meeting summarizer. Create a comprehensive final summary.\n"
+                            "Use only facts that are explicitly present in the transcript.\n"
+                            "Do not infer or invent names, locations, dates, numbers, owners, or deadlines.\n"
+                            "If a detail is missing, write 'Not specified in transcript'.\n\n"
+                            "Return Markdown with exactly these sections and bullet lists only (no tables):\n"
                             "## Overview\n"
                             "## Key Takeaways\n"
                             "## Decisions\n"
@@ -314,12 +344,16 @@ async def meeting_websocket(websocket: WebSocket) -> None:
                             f"Transcript:\n{full_transcript}\n\n"
                             "Be explicit and concrete."
                         )
-                        final_summary = await query_llm(summary_prompt)
+                        final_summary = await query_llm(
+                            summary_prompt,
+                            max_retries=2,
+                            temperature=0.2,
+                        )
 
                         with open(summary_path, "w", encoding="utf-8") as f:
                             f.write(final_summary)
 
-                        await save_meeting_summary(meeting_id, final_summary)
+                        await save_meeting_summary(user_id, meeting_id, final_summary)
                         await safe_send_json(
                             {"type": "final_summary", "summary": final_summary}
                         )
@@ -335,7 +369,7 @@ async def meeting_websocket(websocket: WebSocket) -> None:
                     fallback_summary = _fallback_summary_from_transcript(full_transcript)
                     with open(summary_path, "w", encoding="utf-8") as f:
                         f.write(fallback_summary)
-                    await save_meeting_summary(meeting_id, fallback_summary)
+                    await save_meeting_summary(user_id, meeting_id, fallback_summary)
                     await safe_send_json(
                         {"type": "final_summary", "summary": fallback_summary}
                     )
@@ -471,20 +505,21 @@ async def meeting_websocket(websocket: WebSocket) -> None:
 
 @router.get("/history", response_model=list[MeetingListItem])
 async def meeting_history(
-    _current_user: str = Depends(get_current_user),
+    current_user: str = Depends(get_current_user),
 ) -> list[MeetingListItem]:
     """List recent meetings."""
-    meetings = await list_meetings()
+    meetings = await list_meetings(current_user)
     return [MeetingListItem(**m) for m in meetings]
 
 
 @router.get("/{meeting_id}/transcript", response_model=MeetingTranscriptResponse)
 async def meeting_transcript_endpoint(
     meeting_id: str,
-    _current_user: str = Depends(get_current_user),
+    current_user: str = Depends(get_current_user),
 ) -> MeetingTranscriptResponse:
     """Retrieve the full transcript for a meeting."""
-    transcript = await get_meeting_transcript(meeting_id)
+    validate_meeting_id(meeting_id)
+    transcript = await get_meeting_transcript(current_user, meeting_id)
     if not transcript:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Transcript not found")
     return MeetingTranscriptResponse(meeting_id=meeting_id, transcript=transcript)
@@ -493,10 +528,11 @@ async def meeting_transcript_endpoint(
 @router.get("/{meeting_id}/summary", response_model=MeetingSummaryResponse)
 async def meeting_summary_endpoint(
     meeting_id: str,
-    _current_user: str = Depends(get_current_user),
+    current_user: str = Depends(get_current_user),
 ) -> MeetingSummaryResponse:
     """Retrieve the summary for a meeting."""
-    summary = await get_meeting_summary(meeting_id)
+    validate_meeting_id(meeting_id)
+    summary = await get_meeting_summary(current_user, meeting_id)
     return MeetingSummaryResponse(meeting_id=meeting_id, summary=summary)
 
 
@@ -504,13 +540,14 @@ async def meeting_summary_endpoint(
 async def meeting_chat(
     meeting_id: str,
     request: MeetingChatRequest,
-    _current_user: str = Depends(get_current_user),
+    current_user: str = Depends(get_current_user),
 ) -> MeetingChatResponse:
     """
     Chat about a completed meeting using its transcript as context.
 
     Accepts text or optional voice input (base64 PCM audio).
     """
+    validate_meeting_id(meeting_id)
     query = request.query
 
     # Handle voice input: transcribe audio to text
@@ -533,7 +570,7 @@ async def meeting_chat(
             detail="Query cannot be empty",
         )
 
-    transcript = await get_meeting_transcript(meeting_id)
+    transcript = await get_meeting_transcript(current_user, meeting_id)
     if not transcript:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -541,7 +578,7 @@ async def meeting_chat(
         )
 
     query_lower = query.lower()
-    summary = await get_meeting_summary(meeting_id)
+    summary = await get_meeting_summary(current_user, meeting_id)
 
     # Action command: push summary to Notion.
     if "notion" in query_lower and any(

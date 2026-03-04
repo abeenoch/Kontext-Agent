@@ -1,13 +1,16 @@
 """Authentication routes -- signup and login."""
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, Request, status
 from pydantic import BaseModel, EmailStr
 
 from app.auth import create_access_token, hash_password, verify_password
+from app.config import get_settings
+from app.rate_limiter import auth_rate_limiter
 from app.services.chat_memory import create_user, get_user_by_email
 from app.logger import get_logger
 
 logger = get_logger(__name__)
+settings = get_settings()
 router = APIRouter(prefix="/auth", tags=["Auth"])
 
 
@@ -46,7 +49,7 @@ class AuthResponse(BaseModel):
 
 
 @router.post("/signup", response_model=AuthResponse, status_code=status.HTTP_201_CREATED)
-async def signup(request: SignupRequest) -> AuthResponse:
+async def signup(request: SignupRequest, http_request: Request) -> AuthResponse:
     """
     Register a new user.
 
@@ -56,6 +59,18 @@ async def signup(request: SignupRequest) -> AuthResponse:
     Returns:
         JWT access token and user metadata.
     """
+    client_ip = http_request.client.host if http_request.client else "unknown"
+    rate_key = f"signup:{client_ip}:{request.email.lower()}"
+    if not auth_rate_limiter.allow(
+        key=rate_key,
+        limit=settings.rate_limit_requests,
+        period_seconds=settings.rate_limit_period,
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many signup attempts. Please retry later.",
+        )
+
     existing = await get_user_by_email(request.email)
     if existing is not None:
         raise HTTPException(
@@ -92,7 +107,7 @@ async def signup(request: SignupRequest) -> AuthResponse:
 
 
 @router.post("/login", response_model=AuthResponse)
-async def login(request: LoginRequest) -> AuthResponse:
+async def login(request: LoginRequest, http_request: Request) -> AuthResponse:
     """
     Authenticate an existing user.
 
@@ -102,6 +117,18 @@ async def login(request: LoginRequest) -> AuthResponse:
     Returns:
         JWT access token and user metadata.
     """
+    client_ip = http_request.client.host if http_request.client else "unknown"
+    rate_key = f"login:{client_ip}:{request.email.lower()}"
+    if not auth_rate_limiter.allow(
+        key=rate_key,
+        limit=settings.rate_limit_requests,
+        period_seconds=settings.rate_limit_period,
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many login attempts. Please retry later.",
+        )
+
     user = await get_user_by_email(request.email)
     if user is None:
         raise HTTPException(

@@ -1,15 +1,18 @@
 import uuid
 from asyncio import run
 
+from app.auth import verify_token
 from app.services.chat_memory import save_meeting_chunk, save_meeting_summary
 
 
 def test_meeting_summary_and_transcript_endpoints(client, auth_headers):
     meeting_id = f"smoke-{uuid.uuid4().hex[:8]}"
+    token = auth_headers["Authorization"].split(" ", 1)[1]
+    current_user = verify_token(token)
 
-    run(save_meeting_chunk(meeting_id, "First point discussed"))
-    run(save_meeting_chunk(meeting_id, "Second point discussed"))
-    run(save_meeting_summary(meeting_id, "## Overview\n- Test summary"))
+    run(save_meeting_chunk(current_user, meeting_id, "First point discussed"))
+    run(save_meeting_chunk(current_user, meeting_id, "Second point discussed"))
+    run(save_meeting_summary(current_user, meeting_id, "## Overview\n- Test summary"))
 
     summary = client.get(f"/meeting/{meeting_id}/summary", headers=auth_headers)
     assert summary.status_code == 200, summary.text

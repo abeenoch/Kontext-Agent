@@ -8,7 +8,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 import jwt
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, WebSocket, status
 from fastapi.security import HTTPBearer
 from fastapi.security.http import HTTPAuthorizationCredentials
 from passlib.context import CryptContext
@@ -94,3 +94,30 @@ async def get_current_user(
 ) -> str:
     """FastAPI dependency that extracts the current user from the JWT."""
     return verify_token(credentials.credentials)
+
+
+async def get_current_user_ws(websocket: WebSocket) -> str:
+    """
+    Validate WebSocket auth via query token or Authorization header.
+
+    Browser WebSocket APIs cannot reliably set custom headers in all contexts,
+    so we accept `?token=` as a fallback for first-party clients.
+    """
+    token = websocket.query_params.get("token")
+    if not token:
+        auth_header = websocket.headers.get("authorization", "")
+        if auth_header.lower().startswith("bearer "):
+            token = auth_header[7:].strip()
+
+    if not token:
+        await websocket.close(code=1008)
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Missing WebSocket authentication token",
+        )
+
+    try:
+        return verify_token(token)
+    except HTTPException:
+        await websocket.close(code=1008)
+        raise

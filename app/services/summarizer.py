@@ -57,17 +57,26 @@ async def summarize_periodically(
                 "- unresolved points or risks\n"
                 "## Emerging Action Items\n"
                 "- tentative owners and next steps if mentioned\n\n"
-                "Keep it under 180 words and avoid final conclusions.\n\n"
+                "Keep it under 180 words and avoid final conclusions.\n"
+                "Only include facts present in the transcript. Do not invent names, dates, or numbers.\n\n"
                 f"Transcript:\n{transcript}\n\n"
                 "Periodic update:"
             )
 
-            summary = await query_llm(prompt)
+            summary = await query_llm(prompt, max_retries=1, temperature=0.2)
 
             if summary:
-                await websocket.send_json(
-                    {"type": "periodic_summary", "summary": summary}
-                )
+                try:
+                    await websocket.send_json(
+                        {"type": "periodic_summary", "summary": summary}
+                    )
+                except Exception as send_exc:
+                    # WebSocket is closing/closed: terminate periodic worker cleanly.
+                    logger.info(
+                        "Stopping periodic summarizer; websocket closed: %s",
+                        send_exc,
+                    )
+                    return
                 logger.debug("Periodic summary sent (%d chars)", len(summary))
                 await asyncio.sleep(interval)
                 continue
@@ -77,6 +86,9 @@ async def summarize_periodically(
             raise
         except Exception as exc:
             logger.error("Periodic summary error: %s", exc)
+            if "429" in str(exc):
+                await asyncio.sleep(60)
+                continue
 
         await asyncio.sleep(15)
 

@@ -12,6 +12,7 @@ const WS_URL = import.meta.env.VITE_WS_URL || 'ws://localhost:8000';
 
 export default function MeetingPage() {
     const { user } = useAuth();
+    const wsToken = localStorage.getItem('token');
 
     // -- State -------------------------------------------------------------
     const [transcripts, setTranscripts] = useState([]);
@@ -72,8 +73,8 @@ export default function MeetingPage() {
         }
     }, [activeTab]);
 
-    const { isConnected, sendMessage, connect, disconnect } = useWebSocket(
-        `${WS_URL}/meeting/ws?user_id=${user?.user_id || 'anonymous'}`,
+    const { isConnected, sendMessage, connect, disconnect, disableReconnect } = useWebSocket(
+        `${WS_URL}/meeting/ws${wsToken ? `?token=${encodeURIComponent(wsToken)}` : ''}`,
         handleWebSocketMessage
     );
 
@@ -89,7 +90,11 @@ export default function MeetingPage() {
         setChatMessages([]);
         setStatus(null);
 
-        connect(`${WS_URL}/meeting/ws?user_id=${user?.user_id || 'anonymous'}&meeting_id=${newMeetingId}`);
+        const query = new URLSearchParams({ meeting_id: newMeetingId });
+        if (wsToken) {
+            query.set('token', wsToken);
+        }
+        connect(`${WS_URL}/meeting/ws?${query.toString()}`);
         sendMessage(JSON.stringify({
             type: 'config',
             sample_rate: sampleRate || 16000,
@@ -110,6 +115,7 @@ export default function MeetingPage() {
     };
 
     const handleStopRecording = () => {
+        disableReconnect();
         stopCapture();
         sendMessage('STOP');
     };
