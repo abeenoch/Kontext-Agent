@@ -2,8 +2,6 @@ fastapi
 uvicorn[standard]
 websockets
 pydantic-settings
-aiosqlite
-ranscription
 faster-whisper
 sounddevice
 numpy
@@ -13,8 +11,13 @@ pinecone-client
 notion-client
 streamlit
 requests
+chromadb
+pdfplumber
+asyncpg
 python-dotenv
 python-multipart
 colorlog
+passlib==1.7.4
+bcrypt==4.0.1
 
 #pywin32==306; sys_platform == 'win32'

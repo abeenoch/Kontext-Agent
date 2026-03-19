@@ -1,16 +1,9 @@
-"""
-Meeting route -- real-time transcription with AI summaries.
-
-Provides:
-- WebSocket /meeting/ws for live PCM streaming to Deepgram
-- REST endpoints for meeting history, transcripts, summaries, and post-chat
-"""
-
-import os
 import asyncio
 import json
 import re
 import hashlib
+import os
+import time
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect, status
@@ -33,6 +26,15 @@ from app.services.chat_memory import (
     get_meeting_summary,
     get_meeting_transcript,
     list_meetings,
+    upsert_meeting_session,
+    get_active_meeting,
+    mark_meeting_stopped,
+)
+from app.services.vector_store import (
+    ensure_user_collections,
+    add_meeting_chunk_embedding,
+    add_meeting_summary_embedding,
+    query_meetings,
 )
 from app.auth import get_current_user, get_current_user_ws
 from app.config import get_settings
@@ -44,6 +46,9 @@ settings = get_settings()
 router = APIRouter(prefix="/meeting", tags=["Meeting"])
 
 os.makedirs(settings.transcripts_dir, exist_ok=True)
+
+# Track active meeting sessions per user to allow reconnect without losing meeting_id.
+_active_meetings: dict[str, dict] = {}
 
 
 def _fallback_summary_from_transcript(transcript: str) -> str:
@@ -61,9 +66,7 @@ def _fallback_summary_from_transcript(transcript: str) -> str:
     )
 
 
-# ---------------------------------------------------------------------------
-# Schemas
-# ---------------------------------------------------------------------------
+
 
 
 class MeetingChatRequest(BaseModel):
@@ -97,10 +100,6 @@ class MeetingListItem(BaseModel):
     has_summary: bool
 
 
-# ---------------------------------------------------------------------------
-# WebSocket -- live meeting transcription
-# ---------------------------------------------------------------------------
-
 
 @router.websocket("/ws")
 async def meeting_websocket(websocket: WebSocket) -> None:
@@ -108,6 +107,7 @@ async def meeting_websocket(websocket: WebSocket) -> None:
     user_id = await get_current_user_ws(websocket)
 
     requested_meeting_id = websocket.query_params.get("meeting_id")
+    meeting_id: str
     if requested_meeting_id:
         try:
             meeting_id = validate_meeting_id(requested_meeting_id)
@@ -115,7 +115,18 @@ async def meeting_websocket(websocket: WebSocket) -> None:
             await websocket.close(code=1008)
             return
     else:
-        meeting_id = os.urandom(16).hex()
+        # If user already has an active meeting, reuse it so reconnections keep the same session.
+        existing = await get_active_meeting(user_id)
+        if existing:
+            meeting_id = existing
+            logger.info("Reusing active meeting %s for user %s", meeting_id, user_id)
+        else:
+            meeting_id = os.urandom(16).hex()
+
+    try:
+        await ensure_user_collections(user_id)
+    except Exception as exc:
+        logger.warning("Could not ensure Chroma collections for %s: %s", user_id, exc)
 
     await websocket.accept()
     logger.info("Meeting started: %s", meeting_id)
@@ -143,6 +154,8 @@ async def meeting_websocket(websocket: WebSocket) -> None:
     current_sample_rate = 16000
     stt_needs_reconnect = False
     reconnect_attempting = False
+    chunk_counter = 0
+    stopped_gracefully = False
 
     async def safe_send_json(payload: dict) -> None:
         try:
@@ -163,10 +176,17 @@ async def meeting_websocket(websocket: WebSocket) -> None:
             enable_smart_format=True,
         )
 
+    # Record the active meeting for reconnects
     try:
-        # -- transcript callback --------------------------------------------------
+        await upsert_meeting_session(user_id, meeting_id)
+    except Exception as exc:
+        logger.warning("Failed to persist meeting session: %s", exc)
+
+    try:
+        
 
         async def on_transcript(result: TranscriptResult) -> None:
+            nonlocal chunk_counter
             if not result.is_final:
                 await safe_send_json({"type": "interim", "text": result.text})
                 return
@@ -184,11 +204,23 @@ async def meeting_websocket(websocket: WebSocket) -> None:
             )
 
             timestamp = datetime.now().strftime("%H:%M:%S")
+            ts_numeric = time.time()
             with open(transcript_path, "a", encoding="utf-8") as f:
                 f.write(f"[{timestamp}] {transcript_line}\n")
 
             try:
                 await save_meeting_chunk(user_id, meeting_id, transcript_line)
+                chunk_counter += 1
+                asyncio.create_task(
+                    add_meeting_chunk_embedding(
+                        user_id=user_id,
+                        meeting_id=meeting_id,
+                        text=transcript_line,
+                        speaker=str(result.speaker) if result.speaker is not None else None,
+                        chunk_index=chunk_counter,
+                        created_at=ts_numeric,
+                    )
+                )
             except Exception as exc:
                 logger.warning("Failed to save chunk to DB: %s", exc)
 
@@ -210,7 +242,7 @@ async def meeting_websocket(websocket: WebSocket) -> None:
                 {"type": "error", "message": f"Transcription error: {error}"}
             )
 
-        # -- connect to Deepgram --------------------------------------------------
+        
 
         if not settings.deepgram_api_key:
             await safe_send_json(
@@ -282,10 +314,12 @@ async def meeting_websocket(websocket: WebSocket) -> None:
                 transcript_path,
                 websocket,
                 initial_delay=compute_initial_periodic_delay_seconds(transcript_path),
+                user_id=user_id,
+                meeting_id=meeting_id,
             )
         )
 
-        # -- main message loop ----------------------------------------------------
+        
 
         while meeting_active:
             try:
@@ -307,6 +341,7 @@ async def meeting_websocket(websocket: WebSocket) -> None:
             if text_data == "STOP":
                 logger.info("Meeting stopped: %s", meeting_id)
                 meeting_active = False
+                stopped_gracefully = True
 
                 if summary_task:
                     summary_task.cancel()
@@ -354,6 +389,13 @@ async def meeting_websocket(websocket: WebSocket) -> None:
                             f.write(final_summary)
 
                         await save_meeting_summary(user_id, meeting_id, final_summary)
+                        asyncio.create_task(
+                            add_meeting_summary_embedding(
+                                user_id=user_id,
+                                meeting_id=meeting_id,
+                                summary_text=final_summary,
+                            )
+                        )
                         await safe_send_json(
                             {"type": "final_summary", "summary": final_summary}
                         )
@@ -370,6 +412,13 @@ async def meeting_websocket(websocket: WebSocket) -> None:
                     with open(summary_path, "w", encoding="utf-8") as f:
                         f.write(fallback_summary)
                     await save_meeting_summary(user_id, meeting_id, fallback_summary)
+                    asyncio.create_task(
+                        add_meeting_summary_embedding(
+                            user_id=user_id,
+                            meeting_id=meeting_id,
+                            summary_text=fallback_summary,
+                        )
+                    )
                     await safe_send_json(
                         {"type": "final_summary", "summary": fallback_summary}
                     )
@@ -381,7 +430,7 @@ async def meeting_websocket(websocket: WebSocket) -> None:
                     )
                 continue
 
-            # -- config / handshake -----------------------------------------------
+            # config / handshake
             if text_data and text_data.startswith('{') and '"config"' in text_data:
                 try:
                     config = json.loads(text_data)
@@ -442,10 +491,14 @@ async def meeting_websocket(websocket: WebSocket) -> None:
                     )
                 continue
 
-            # -- audio data -------------------------------------------------------
+            #audio data
             if meeting_active:
                 try:
                     await reconnect_stt_if_needed()
+                    # If reconnecting, drop audio until socket is back to avoid errors.
+                    if stt_needs_reconnect or not deepgram_handler or not deepgram_handler.is_connected:
+                        continue
+
                     pcm_data = None
                     if bytes_data:
                         # Preferred fast path: raw PCM16 bytes over websocket binary frames.
@@ -495,12 +548,18 @@ async def meeting_websocket(websocket: WebSocket) -> None:
                 await summary_task
             except asyncio.CancelledError:
                 pass
-        logger.info("Meeting ended: %s", meeting_id)
+        # If meeting was explicitly stopped, clear active mapping; otherwise keep for reconnect.
+        if stopped_gracefully:
+            _active_meetings.pop(user_id, None)
+            try:
+                await mark_meeting_stopped(user_id)
+            except Exception as exc:
+                logger.debug("Failed to mark meeting stopped: %s", exc)
+            logger.info("Meeting ended: %s", meeting_id)
+        else:
+            logger.info("Meeting paused (awaiting reconnect): %s", meeting_id)
 
 
-# ---------------------------------------------------------------------------
-# REST endpoints
-# ---------------------------------------------------------------------------
 
 
 @router.get("/history", response_model=list[MeetingListItem])
@@ -580,6 +639,18 @@ async def meeting_chat(
     query_lower = query.lower()
     summary = await get_meeting_summary(current_user, meeting_id)
 
+    # Vector-powered retrieval scoped to this meeting for efficient context.
+    context_chunks: list[str] = []
+    try:
+        context_chunks = await query_meetings(
+            user_id=current_user,
+            query=query,
+            meeting_id=meeting_id,
+            n_results=6,
+        )
+    except Exception as exc:
+        logger.warning("Meeting RAG retrieval failed: %s", exc)
+
     # Action command: push summary to Notion.
     if "notion" in query_lower and any(
         token in query_lower for token in ("push", "send", "save", "export", "upload")
@@ -639,13 +710,30 @@ async def meeting_chat(
                 response_parts.append(f"Failed: {', '.join(failed)}.")
             return MeetingChatResponse(response=" ".join(response_parts))
 
+    context_blocks: list[str] = []
+    if summary:
+        context_blocks.append(f"Final Summary:\n{summary}")
+    if context_chunks:
+        context_blocks.append("Transcript Excerpts:\n" + "\n\n".join(context_chunks))
+    if not context_blocks:
+        context_blocks.append(f"Full Transcript:\n{transcript}")
+
+    context_joined = "\n\n".join(context_blocks)
+
     prompt = (
-        "You are an AI meeting assistant. Answer the user's question based on "
-        "the meeting transcript below.\n\n"
-        f"Transcript:\n{transcript}\n\n"
+        "You are an AI meeting assistant. Answer the user's question using the meeting context below.\n\n"
+        f"{context_joined}\n\n"
         f"User question: {query}\n\n"
-        "Provide a clear, helpful answer."
+        "Provide a clear, helpful answer grounded in the provided context."
     )
 
-    response_text = await query_llm(prompt)
-    return MeetingChatResponse(response=response_text)
+    try:
+        response_text = await query_llm(prompt)
+        return MeetingChatResponse(response=response_text)
+    except httpx.HTTPStatusError as exc:
+        if exc.response.status_code == 503:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="LLM provider temporarily unavailable. Please retry shortly.",
+            )
+        raise

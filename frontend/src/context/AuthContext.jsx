@@ -62,11 +62,13 @@ export const AuthProvider = ({ children }) => {
         }
     };
 
-    const logout = () => {
-        localStorage.removeItem('token');
-        localStorage.removeItem('user');
-        setUser(null);
-    };
+  const logout = () => {
+    localStorage.removeItem('token');
+    localStorage.removeItem('user');
+    setUser(null);
+    // Notify other contexts (e.g., Meeting) to cleanup
+    window.dispatchEvent(new Event('app:logout'));
+  };
 
     return (
         <AuthContext.Provider value={{ user, login, signup, logout, loading }}>

@@ -11,12 +11,21 @@ import jwt
 from fastapi import Depends, HTTPException, WebSocket, status
 from fastapi.security import HTTPBearer
 from fastapi.security.http import HTTPAuthorizationCredentials
+import bcrypt
 from passlib.context import CryptContext
+import types
 
 from app.config import get_settings
 
 settings = get_settings()
 security = HTTPBearer()
+
+# passlib 1.7.x expects bcrypt to expose __about__.__version__, which was
+# removed in bcrypt 4.1+. Provide a lightweight shim so passlib can read the
+# version without downgrading the system bcrypt package.
+if not hasattr(bcrypt, "__about__"):
+    bcrypt.__about__ = types.SimpleNamespace(__version__=bcrypt.__version__)
+
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 

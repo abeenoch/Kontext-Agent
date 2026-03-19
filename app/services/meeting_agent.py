@@ -1,11 +1,3 @@
-"""Meeting agent for post-meeting interactions.
-
-Interprets user requests in the context of a meeting summary and can:
-- Answer questions about the meeting
-- Send summaries via email
-- Push summaries to Notion
-"""
-
 import re
 from typing import Optional
 

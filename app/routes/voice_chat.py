@@ -40,7 +40,7 @@ async def voice_chat_websocket(websocket: WebSocket) -> None:
         except Exception:
             pass
 
-        # -- transcript callback --------------------------------------------------
+        # 
 
         async def on_transcript(result: TranscriptResult) -> None:
             if not result.is_final:
@@ -110,7 +110,7 @@ async def voice_chat_websocket(websocket: WebSocket) -> None:
                 {"type": "error", "message": f"Transcription error: {error}"}
             )
 
-        # -- connect to Deepgram --------------------------------------------------
+        #connect to Deepgram
 
         if not settings.deepgram_api_key:
             await websocket.send_json(
@@ -149,7 +149,7 @@ async def voice_chat_websocket(websocket: WebSocket) -> None:
 
         keepalive_task = asyncio.create_task(deepgram_keepalive())
 
-        # -- main loop ------------------------------------------------------------
+        #main loop 
 
         while True:
             try:

@@ -1,173 +1,58 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState } from 'react';
 import { Mic, Square, RotateCcw, MessageSquare, FileText } from 'lucide-react';
-import { useAudioCapture } from '../hooks/useAudioCapture';
-import { useWebSocket } from '../hooks/useWebSocket';
-import { useAuth } from '../context/AuthContext';
+import { useMeeting } from '../context/MeetingContext';
 import TranscriptPanel from '../components/TranscriptPanel';
 import SummaryPanel from '../components/SummaryPanel';
 import ChatPanel from '../components/ChatPanel';
-import api from '../services/api';
-
-const WS_URL = import.meta.env.VITE_WS_URL || 'ws://localhost:8000';
 
 export default function MeetingPage() {
-    const { user } = useAuth();
-    const wsToken = localStorage.getItem('token');
+    const [activeTab, setActiveTab] = useState('summary');
 
-    // -- State -------------------------------------------------------------
-    const [transcripts, setTranscripts] = useState([]);
-    const [interimTranscript, setInterimTranscript] = useState('');
-    const [summary, setSummary] = useState('');
-    const [status, setStatus] = useState(null); // { type, message }
-    const [meetingId, setMeetingId] = useState(null);
-    const [activeTab, setActiveTab] = useState('summary'); // 'summary' | 'chat'
-
-    // Chat state
-    const [chatMessages, setChatMessages] = useState([]);
-    const [isChatLoading, setIsChatLoading] = useState(false);
-
-    // -- Hooks -------------------------------------------------------------
-    const { isRecording, startCapture, stopCapture, sampleRate } = useAudioCapture();
-
-    const handleWebSocketMessage = useCallback((data) => {
-        switch (data.type) {
-            case 'connected':
-                // Capture meeting ID from server
-                if (data.meeting_id) {
-                    setMeetingId(data.meeting_id);
-                    console.log('Meeting ID:', data.meeting_id);
-                }
-                setStatus({ type: 'success', message: 'Connected' });
-                break;
-            case 'status':
-                setStatus({
-                    type: data.message?.toLowerCase().includes('generating') ? 'loading' : 'success',
-                    message: data.message || 'Status update',
-                });
-                break;
-            case 'transcript':
-                setInterimTranscript('');
-                setTranscripts(prev => [...prev, {
-                    text: data.text,
-                    speaker: data.speaker,
-                    timestamp: new Date().toLocaleTimeString()
-                }]);
-                break;
-            case 'interim':
-                setInterimTranscript(data.text || '');
-                break;
-            case 'periodic_summary':
-            case 'final_summary':
-                setSummary(data.summary);
-                setStatus({ type: 'success', message: 'Summary ready' });
-                // Switch to summary tab if valid summary arrives and not checking chat
-                if (activeTab !== 'chat') {
-                    setActiveTab('summary');
-                }
-                break;
-            case 'error':
-                setStatus({ type: 'error', message: data.message });
-                break;
-            default:
-                break;
-        }
-    }, [activeTab]);
-
-    const { isConnected, sendMessage, connect, disconnect, disableReconnect } = useWebSocket(
-        `${WS_URL}/meeting/ws${wsToken ? `?token=${encodeURIComponent(wsToken)}` : ''}`,
-        handleWebSocketMessage
-    );
+    const {
+        meetingId,
+        transcripts,
+        interimTranscript,
+        summary,
+        status,
+        setStatus,
+        chatMessages,
+        isChatLoading,
+        isRecording,
+        isConnected,
+        startMeeting,
+        stopMeeting,
+        sendMeetingChat,
+        sendEmail,
+        sendNotion,
+        setChatMessages,
+        setTranscripts,
+        setInterimTranscript,
+        setSummary,
+    } = useMeeting();
 
     // -- Handlers ----------------------------------------------------------
 
     const handleStartRecording = async () => {
-        disconnect();
-        const newMeetingId = crypto.randomUUID().replace(/-/g, '');
-        setMeetingId(newMeetingId);
-        setTranscripts([]);
-        setInterimTranscript('');
-        setSummary('');
-        setChatMessages([]);
-        setStatus(null);
-
-        const query = new URLSearchParams({ meeting_id: newMeetingId });
-        if (wsToken) {
-            query.set('token', wsToken);
-        }
-        connect(`${WS_URL}/meeting/ws?${query.toString()}`);
-        sendMessage(JSON.stringify({
-            type: 'config',
-            sample_rate: sampleRate || 16000,
-        }));
-
-        // Start capture. Note: In a real app, we might wait for WS 'connected' event
-        // with the meeting_id before starting audio, but here we can start capturing
-        // and the WS will handle flow.
-        const started = await startCapture((pcmFrame) => {
-            // Drop stale audio if socket is down to avoid lag burst after reconnect.
-            sendMessage(pcmFrame, { dropIfDisconnected: true });
-        }, { output: 'arraybuffer' });
-
-        if (!started) {
-            setStatus({ type: 'error', message: 'Failed to access microphone' });
-            disconnect();
-        }
+        await startMeeting();
     };
 
     const handleStopRecording = () => {
-        disableReconnect();
-        stopCapture();
-        sendMessage('STOP');
+        stopMeeting();
     };
 
     const handleEmail = async () => {
         setStatus({ type: 'loading', message: 'Sending email...' });
-        sendMessage(`ACTION: EMAIL ${user.email}`);
+        sendEmail();
     };
 
     const handleNotion = async () => {
         setStatus({ type: 'loading', message: 'Pushing to Notion...' });
-        sendMessage('ACTION: NOTION');
+        sendNotion();
     };
 
     const handleChatSubmit = async (text, voiceAudio = null) => {
-        if (!meetingId) {
-            setStatus({ type: 'error', message: 'No active meeting context' });
-            return;
-        }
-
-        // Add user message immediately
-        const userMsg = { role: 'user', content: text || '(Voice Message)' };
-        setChatMessages(prev => [...prev, userMsg]);
-        setIsChatLoading(true);
-
-        try {
-            const response = await api.post(`/meeting/${meetingId}/chat`, {
-                query: text,
-                voice_audio: voiceAudio
-            });
-
-            // Add AI response
-            const aiMsg = { role: 'assistant', content: response.data.response };
-            setChatMessages(prev => [...prev, aiMsg]);
-        } catch (error) {
-            console.error('Chat error:', error);
-            setChatMessages(prev => [...prev, {
-                role: 'assistant',
-                content: 'Sorry, I encountered an error answering your question.'
-            }]);
-        } finally {
-            setIsChatLoading(false);
-        }
+        await sendMeetingChat(text, voiceAudio);
     };
-
-    // Cleanup
-    useEffect(() => {
-        return () => {
-            stopCapture();
-            disconnect();
-        };
-    }, []);
 
     // -- Render ------------------------------------------------------------
     return (

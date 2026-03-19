@@ -1,4 +1,3 @@
-"""Embedding utilities with lazy loading."""
 _model = None
 
 

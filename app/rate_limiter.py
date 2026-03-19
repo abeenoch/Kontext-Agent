@@ -1,5 +1,3 @@
-"""Simple in-memory sliding-window rate limiter."""
-
 from collections import defaultdict, deque
 from threading import Lock
 from time import time

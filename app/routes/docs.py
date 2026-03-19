@@ -6,17 +6,21 @@ from fastapi import (
     HTTPException,
     UploadFile,
     status,
+    BackgroundTasks,
 )
 from pydantic import BaseModel
 
 from app.auth import get_current_user
-from app.services.rag_pipeline import ingest_file, retrieve_docs, clear_user_docs
+from app.services.rag_pipeline import retrieve_docs, clear_user_docs
 from app.services.llm_agent import query_llm
 from app.services.audio import process_browser_audio
 from app.services.chat_memory import add_message, get_recent_history
+from app.services.doc_jobs import process_doc_job, get_job
+from app.services.chat_memory import create_doc_job
 from app.validators import validate_file_type, validate_file_size
 from app.config import get_settings
 from app.logger import get_logger
+import httpx
 
 logger = get_logger(__name__)
 settings = get_settings()
@@ -26,16 +30,14 @@ MAX_FILE_SIZE_MB = 50
 ALLOWED_FILE_TYPES = ["pdf", "txt"]
 
 
-# ---------------------------------------------------------------------------
-# Schemas
-# ---------------------------------------------------------------------------
 
 
 class DocsChatRequest(BaseModel):
     """Chat request for the docs page."""
     query: str
-    voice_audio: str | None = None  # optional base64 PCM for voice input
-    use_rag: bool = True  # True = RAG mode, False = plain LLM
+    voice_audio: str | None = None  
+    use_rag: bool = True  # True = RAG mode
+    job_id: str | None = None  #  wait for specific ingestion job completion
 
 
 class DocsChatResponse(BaseModel):
@@ -48,7 +50,16 @@ class UploadResponse(BaseModel):
     """Document upload response."""
     filename: str
     status: str
-    chunks_ingested: int
+    job_id: str
+
+
+class JobStatusResponse(BaseModel):
+    """Job status response."""
+    id: str
+    filename: str
+    status: str
+    chunks_ingested: int | None = None
+    error: str | None = None
 
 
 class ClearDocsResponse(BaseModel):
@@ -56,14 +67,28 @@ class ClearDocsResponse(BaseModel):
     status: str
 
 
-# ---------------------------------------------------------------------------
-# Upload
-# ---------------------------------------------------------------------------
+@router.get("/status/{job_id}", response_model=JobStatusResponse)
+async def get_job_status(
+    job_id: str,
+    user_id: str = Depends(get_current_user),
+) -> JobStatusResponse:
+    job = await get_job(job_id, user_id)
+    if not job:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job not found")
+    return JobStatusResponse(
+        id=job["id"],
+        filename=job["filename"],
+        status=job["status"],
+        chunks_ingested=job.get("chunks_ingested"),
+        error=job.get("error"),
+    )
+
 
 
 @router.post("/upload", response_model=UploadResponse)
 async def upload_document(
     file: UploadFile = File(...),
+    background_tasks: BackgroundTasks = None,
     user_id: str = Depends(get_current_user),
 ) -> UploadResponse:
     """
@@ -83,17 +108,14 @@ async def upload_document(
     validate_file_size(len(content), MAX_FILE_SIZE_MB)
 
     try:
-        num_chunks = await ingest_file(user_id, file.filename, content)
-        logger.info(
-            "Document uploaded: %s by %s (%d chunks)",
-            file.filename,
-            user_id,
-            num_chunks,
-        )
+        job_id = await create_doc_job(user_id, file.filename)
+        # enqueue background ingestion
+        background_tasks.add_task(process_doc_job, job_id, user_id, file.filename, content)
+        logger.info("Doc upload queued: %s by %s (job=%s)", file.filename, user_id, job_id)
         return UploadResponse(
             filename=file.filename,
-            status="ingested",
-            chunks_ingested=num_chunks,
+            status="queued",
+            job_id=job_id,
         )
     except Exception as exc:
         logger.error("Document ingestion error: %s", exc, exc_info=True)
@@ -118,11 +140,6 @@ async def clear_documents(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to clear documents",
         )
-
-
-# ---------------------------------------------------------------------------
-# Chat
-# ---------------------------------------------------------------------------
 
 
 @router.post("/chat", response_model=DocsChatResponse)
@@ -160,6 +177,20 @@ async def docs_chat(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Query cannot be empty",
         )
+
+    # If a specific job was provided, ensure it's complete before chatting.
+    if request.job_id:
+        job = await get_job(request.job_id, user_id)
+        if not job:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Ingestion job not found",
+            )
+        if job["status"] != "completed":
+            raise HTTPException(
+                status_code=status.HTTP_425_TOO_EARLY,
+                detail=f"Job status: {job['status']}",
+            )
 
     sources_used = False
 
@@ -206,6 +237,17 @@ async def docs_chat(
 
         return DocsChatResponse(response=response, sources_used=sources_used)
 
+    except httpx.HTTPStatusError as exc:
+        if exc.response.status_code == 503:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="LLM provider temporarily unavailable. Please retry shortly.",
+            )
+        logger.error("Docs chat HTTP error: %s", exc)
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Upstream LLM error",
+        )
     except Exception as exc:
         logger.error("Docs chat error: %s", exc, exc_info=True)
         raise HTTPException(

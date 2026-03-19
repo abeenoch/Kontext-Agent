@@ -1,5 +1,3 @@
-"""Async LLM agent service for querying Groq API."""
-
 import httpx
 
 from app.config import get_settings
@@ -42,10 +40,6 @@ async def query_llm(
     if not settings.groq_api_key:
         raise ValueError("GROQ_API_KEY environment variable not set")
     
-    # Masked key for diagnostic: gsk_...XXXX
-    masked_key = f"{settings.groq_api_key[:7]}...{settings.groq_api_key[-4:]}" if len(settings.groq_api_key) > 15 else "***"
-    logger.info("Using Groq API Key: %s (len=%d)", masked_key, len(settings.groq_api_key))
-
     if not prompt or not prompt.strip():
         logger.warning("Empty prompt provided to LLM")
         return ""

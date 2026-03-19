@@ -8,21 +8,17 @@ from app.services.chat_memory import add_message, get_recent_history, clear_hist
 from app.services.audio import process_browser_audio
 from app.config import get_settings
 from app.logger import get_logger
+import httpx
 
 logger = get_logger(__name__)
 settings = get_settings()
 router = APIRouter(prefix="/chat", tags=["Chat"])
 
 
-# ---------------------------------------------------------------------------
-# Schemas
-# ---------------------------------------------------------------------------
-
-
 class ChatRequest(BaseModel):
     """Chat query request body."""
     query: str
-    voice_audio: str | None = None  # optional base64 PCM for voice input
+    voice_audio: str | None = None  
 
 
 class ChatResponse(BaseModel):
@@ -36,9 +32,7 @@ class ClearResponse(BaseModel):
     status: str
 
 
-# ---------------------------------------------------------------------------
-# Endpoints
-# ---------------------------------------------------------------------------
+
 
 
 @router.post("/query", response_model=ChatResponse)
@@ -115,6 +109,18 @@ async def chat_query(
 
         return ChatResponse(response=response, sources_used=sources_used)
 
+    except httpx.HTTPStatusError as exc:
+        status_code = exc.response.status_code
+        logger.error("Chat query http error: %s", exc)
+        if status_code == 503:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="LLM provider is temporarily unavailable. Please retry in a moment.",
+            )
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Upstream LLM error",
+        )
     except Exception as exc:
         logger.error("Chat query error: %s", exc, exc_info=True)
         raise HTTPException(

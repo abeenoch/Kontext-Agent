@@ -1,5 +1,3 @@
-"""Periodic and final meeting summarization service."""
-
 import asyncio
 import os
 from datetime import datetime
@@ -7,6 +5,7 @@ from datetime import datetime
 from fastapi import WebSocket
 
 from app.services.llm_agent import query_llm
+from app.services.chat_memory import save_periodic_summary
 from app.logger import get_logger
 
 logger = get_logger(__name__)
@@ -19,6 +18,8 @@ async def summarize_periodically(
     websocket: WebSocket,
     interval: int = SUMMARY_INTERVAL_SECONDS,
     initial_delay: int | None = None,
+    user_id: str | None = None,
+    meeting_id: str | None = None,
 ) -> None:
     """
     Background task that reads the growing transcript file and
@@ -66,6 +67,11 @@ async def summarize_periodically(
             summary = await query_llm(prompt, max_retries=1, temperature=0.2)
 
             if summary:
+                if user_id and meeting_id:
+                    try:
+                        await save_periodic_summary(user_id, meeting_id, summary)
+                    except Exception as db_exc:
+                        logger.warning("Failed to persist periodic summary: %s", db_exc)
                 try:
                     await websocket.send_json(
                         {"type": "periodic_summary", "summary": summary}

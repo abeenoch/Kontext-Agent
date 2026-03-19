@@ -1,27 +1,16 @@
-"""RAG pipeline -- document ingestion and retrieval via ChromaDB."""
-
 import asyncio
-from typing import Optional
+from datetime import datetime
 
-import chromadb
 import pdfplumber
 
 from app.utils.text_splitter import split_text
 from app.utils.embedding_utils import get_embedding
 from app.config import get_settings
 from app.logger import get_logger
+from app.services.vector_store import get_docs_collection, clear_docs_collection
 
 logger = get_logger(__name__)
 settings = get_settings()
-
-# Persistent ChromaDB client
-_chroma_client = chromadb.PersistentClient(path=settings.chroma_dir)
-
-
-def _get_collection(user_id: str) -> chromadb.Collection:
-    """Get or create a ChromaDB collection for a user."""
-    collection_name = f"user_{user_id.replace('@', '_').replace('.', '_')}"
-    return _chroma_client.get_or_create_collection(name=collection_name)
 
 
 async def ingest_file(user_id: str, filename: str, content: bytes) -> int:
@@ -65,7 +54,8 @@ async def ingest_file(user_id: str, filename: str, content: bytes) -> int:
         return 0
 
     # Embed and store
-    collection = _get_collection(user_id)
+    collection = get_docs_collection(user_id)
+    uploaded_at = datetime.utcnow().timestamp()
 
     for i, chunk in enumerate(chunks):
         chunk_id = f"{filename}__chunk_{i}"
@@ -74,7 +64,14 @@ async def ingest_file(user_id: str, filename: str, content: bytes) -> int:
             ids=[chunk_id],
             documents=[chunk],
             embeddings=[embedding.tolist()],
-            metadatas=[{"filename": filename, "chunk_index": i}],
+            metadatas=[
+                {
+                    "filename": filename,
+                    "chunk_index": i,
+                    "user_id": user_id,
+                    "uploaded_at": uploaded_at,
+                }
+            ],
         )
 
     logger.info("Ingested %d chunks from %s for user %s", len(chunks), filename, user_id)
@@ -112,7 +109,7 @@ async def retrieve_docs(
     """
     try:
         loop = asyncio.get_running_loop()
-        collection = _get_collection(user_id)
+        collection = get_docs_collection(user_id)
 
         # Check if collection has any documents
         if collection.count() == 0:
@@ -136,8 +133,7 @@ async def retrieve_docs(
 async def clear_user_docs(user_id: str) -> None:
     """Delete all documents for a user from the vector store."""
     try:
-        collection_name = f"user_{user_id.replace('@', '_').replace('.', '_')}"
-        _chroma_client.delete_collection(name=collection_name)
+        await clear_docs_collection(user_id)
         logger.info("Cleared documents for user %s", user_id)
     except Exception as exc:
         logger.warning("Error clearing docs for %s: %s", user_id, exc)

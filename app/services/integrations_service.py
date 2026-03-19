@@ -1,5 +1,3 @@
-"""Integration services for email and Notion."""
-
 import html
 import re
 import smtplib
@@ -179,6 +177,44 @@ def send_meeting_summary_email(to_email: str, subject: str, summary: str) -> boo
         return False
     except Exception as e:
         logger.error("Error sending email: %s", e, exc_info=True)
+        return False
+
+
+def send_password_reset_email(to_email: str, reset_token: str) -> bool:
+    """
+    Send a password reset email with a one-time token.
+
+    If FRONTEND_URL is configured, include a deep link; otherwise include the token.
+    """
+    try:
+        validate_email(to_email)
+        if not settings.smtp_user or not settings.smtp_pass:
+            logger.error("SMTP credentials not configured")
+            return False
+
+        reset_link = f"{settings.frontend_url.rstrip('/')}/reset-password?token={reset_token}"
+        body = (
+            f"<p>We received a request to reset your password.</p>"
+            f"<p>Reset link: <a href=\"{reset_link}\">{reset_link}</a></p>"
+            f"<p>If you did not request this, you can ignore this email.</p>"
+        )
+
+        msg = MIMEMultipart()
+        msg["From"] = settings.smtp_user
+        msg["To"] = to_email
+        msg["Subject"] = "Reset your Kontext Agent password"
+        msg.attach(MIMEText(body, "html"))
+
+        with smtplib.SMTP(settings.smtp_host, settings.smtp_port) as server:
+            server.starttls()
+            server.login(settings.smtp_user, settings.smtp_pass)
+            server.send_message(msg)
+
+        logger.info("Password reset email sent to %s", to_email)
+        return True
+
+    except Exception as exc:
+        logger.error("Password reset email error: %s", exc, exc_info=True)
         return False
 
 

@@ -1,30 +1,22 @@
-"""Database models and data access layer.
-
-Uses SQLAlchemy async with aiosqlite for:
-- User accounts (signup/login)
-- Chat message history
-- Meeting transcripts and summaries
-"""
-
+import hashlib
+import secrets
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+from uuid import uuid4
 
-from sqlalchemy import Column, DateTime, Float, Integer, String, Text
+from sqlalchemy import Column, DateTime, Float, Integer, String, Text, Index, UniqueConstraint
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.future import select
 from sqlalchemy.orm import declarative_base, sessionmaker
 from sqlalchemy.sql import func, text
 
-DATABASE_URL = "sqlite+aiosqlite:///./memory.db"
+from app.config import get_settings
+
+_settings = get_settings()
+DATABASE_URL = _settings.get_database_url()
 engine = create_async_engine(DATABASE_URL, echo=False)
 SessionLocal = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 Base = declarative_base()
-
-
-# ---------------------------------------------------------------------------
-# Models
-# ---------------------------------------------------------------------------
-
 
 class User(Base):
     """Registered user account."""
@@ -42,6 +34,9 @@ class ChatMessage(Base):
     """Persisted chat message."""
 
     __tablename__ = "chat_messages"
+    __table_args__ = (
+        Index("idx_chat_messages_user_ts", "user_id", "timestamp"),
+    )
 
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(String, index=True)
@@ -54,6 +49,9 @@ class MeetingTranscript(Base):
     """Individual transcript chunk from a meeting."""
 
     __tablename__ = "meeting_transcripts"
+    __table_args__ = (
+        Index("idx_meeting_transcripts_user_meeting", "user_id", "meeting_id"),
+    )
 
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(String, index=True, nullable=False, default="legacy")
@@ -67,6 +65,9 @@ class MeetingSummary(Base):
     """Final or periodic summary of a meeting."""
 
     __tablename__ = "meeting_summaries"
+    __table_args__ = (
+        UniqueConstraint("user_id", "meeting_id", name="ux_meeting_summary_user_meeting"),
+    )
 
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(String, index=True, nullable=False, default="legacy")
@@ -75,78 +76,79 @@ class MeetingSummary(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
-# ---------------------------------------------------------------------------
-# Database init
-# ---------------------------------------------------------------------------
+class MeetingPeriodicSummary(Base):
+    """Periodic (in-meeting) summary snapshots."""
+
+    __tablename__ = "meeting_periodic_summaries"
+    __table_args__ = (
+        Index("idx_meeting_periodic_user_meeting_ts", "user_id", "meeting_id", "created_at"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(String, index=True, nullable=False, default="legacy")
+    meeting_id = Column(String, index=True)
+    summary = Column(Text)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class PasswordResetToken(Base):
+    """Password reset token with expiry and single use."""
+
+    __tablename__ = "password_reset_tokens"
+    __table_args__ = (
+        Index("idx_reset_user_expires", "user_id", "expires_at"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(String, index=True, nullable=False)
+    token_hash = Column(String, nullable=False, unique=True)
+    expires_at = Column(DateTime(timezone=True), nullable=False)
+    used_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class DocIngestionJob(Base):
+    """Track document ingestion tasks."""
+
+    __tablename__ = "doc_ingestion_jobs"
+    __table_args__ = (
+        Index("idx_doc_jobs_user_created", "user_id", "created_at"),
+    )
+
+    id = Column(String, primary_key=True, index=True)  # UUID
+    user_id = Column(String, index=True, nullable=False)
+    filename = Column(String, nullable=False)
+    status = Column(String, nullable=False, default="queued")  # queued | processing | completed | failed
+    chunks_ingested = Column(Integer, nullable=True)
+    error = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class MeetingSession(Base):
+    """Active meeting session for reconnect (multi-worker safe)."""
+
+    __tablename__ = "meeting_sessions"
+    __table_args__ = (
+        Index("idx_meeting_session_user", "user_id"),
+    )
+
+    user_id = Column(String, primary_key=True)
+    meeting_id = Column(String, nullable=False)
+    last_seen = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    active = Column(Integer, nullable=False, default=1)  # 1 active, 0 stopped
+
+
 
 
 async def init_db() -> None:
     """Create all tables if they do not exist."""
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
-        await _migrate_multi_tenant_meetings(conn)
+    await prune_expired_reset_tokens()
+    await prune_old_doc_jobs()
 
 
-async def _migrate_multi_tenant_meetings(conn) -> None:
-    """Backfill user scoping for meeting tables and remove global uniqueness."""
-    transcript_columns = await conn.execute(text("PRAGMA table_info(meeting_transcripts)"))
-    transcript_column_names = {row[1] for row in transcript_columns.fetchall()}
-    if "user_id" not in transcript_column_names:
-        await conn.execute(text("ALTER TABLE meeting_transcripts ADD COLUMN user_id VARCHAR"))
-    await conn.execute(
-        text("UPDATE meeting_transcripts SET user_id = 'legacy' WHERE user_id IS NULL")
-    )
-    await conn.execute(
-        text(
-            "CREATE INDEX IF NOT EXISTS idx_meeting_transcripts_user_meeting "
-            "ON meeting_transcripts(user_id, meeting_id)"
-        )
-    )
-
-    summary_columns = await conn.execute(text("PRAGMA table_info(meeting_summaries)"))
-    summary_column_names = {row[1] for row in summary_columns.fetchall()}
-    if "user_id" not in summary_column_names:
-        await conn.execute(
-            text(
-                """
-                CREATE TABLE IF NOT EXISTS meeting_summaries_v2 (
-                    id INTEGER PRIMARY KEY,
-                    user_id VARCHAR NOT NULL,
-                    meeting_id VARCHAR,
-                    summary TEXT,
-                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                    UNIQUE(user_id, meeting_id)
-                )
-                """
-            )
-        )
-        await conn.execute(
-            text(
-                """
-                INSERT INTO meeting_summaries_v2 (id, user_id, meeting_id, summary, created_at)
-                SELECT id, 'legacy', meeting_id, summary, created_at
-                FROM meeting_summaries
-                """
-            )
-        )
-        await conn.execute(text("DROP TABLE meeting_summaries"))
-        await conn.execute(text("ALTER TABLE meeting_summaries_v2 RENAME TO meeting_summaries"))
-    else:
-        await conn.execute(
-            text("UPDATE meeting_summaries SET user_id = 'legacy' WHERE user_id IS NULL")
-        )
-
-    await conn.execute(
-        text(
-            "CREATE UNIQUE INDEX IF NOT EXISTS idx_meeting_summaries_user_meeting "
-            "ON meeting_summaries(user_id, meeting_id)"
-        )
-    )
-
-
-# ---------------------------------------------------------------------------
-# User operations
-# ---------------------------------------------------------------------------
 
 
 async def create_user(email: str, password_hash: str, display_name: str = "") -> User:
@@ -182,9 +184,216 @@ async def get_user_by_email(email: str) -> User | None:
         return result.scalars().first()
 
 
+async def update_user_password(email: str, password_hash: str) -> None:
+    """Update a user's password hash."""
+    async with SessionLocal() as session:
+        await session.execute(
+            text("UPDATE users SET password_hash = :pwd WHERE email = :email"),
+            {"pwd": password_hash, "email": email},
+        )
+        await session.commit()
+
+
+
+
+async def create_doc_job(user_id: str, filename: str) -> str:
+    """Create a new doc ingestion job and return its id."""
+    job_id = str(uuid4())
+    async with SessionLocal() as session:
+        session.add(
+            DocIngestionJob(
+                id=job_id,
+                user_id=user_id,
+                filename=filename,
+                status="queued",
+            )
+        )
+        await session.commit()
+    return job_id
+
+
+async def update_doc_job(
+    job_id: str,
+    *,
+    status: str,
+    chunks_ingested: int | None = None,
+    error: str | None = None,
+) -> None:
+    async with SessionLocal() as session:
+        await session.execute(
+            text(
+                "UPDATE doc_ingestion_jobs "
+                "SET status = :status, chunks_ingested = :chunks, error = :error, updated_at = CURRENT_TIMESTAMP "
+                "WHERE id = :id"
+            ),
+            {
+                "status": status,
+                "chunks": chunks_ingested,
+                "error": error,
+                "id": job_id,
+            },
+        )
+        await session.commit()
+
+
+async def get_doc_job(job_id: str) -> dict | None:
+    async with SessionLocal() as session:
+        result = await session.execute(
+            select(DocIngestionJob).where(DocIngestionJob.id == job_id)
+        )
+        job = result.scalars().first()
+        if not job:
+            return None
+        return {
+            "id": job.id,
+            "user_id": job.user_id,
+            "filename": job.filename,
+            "status": job.status,
+            "chunks_ingested": job.chunks_ingested,
+            "error": job.error,
+            "created_at": job.created_at.isoformat() if job.created_at else None,
+            "updated_at": job.updated_at.isoformat() if job.updated_at else None,
+        }
+
+
 # ---------------------------------------------------------------------------
-# Chat history operations
+# Meeting session helpers
 # ---------------------------------------------------------------------------
+
+
+async def upsert_meeting_session(user_id: str, meeting_id: str) -> None:
+    """Create/update active meeting session with heartbeat."""
+    async with SessionLocal() as session:
+        await session.execute(
+            text(
+                """
+                INSERT INTO meeting_sessions (user_id, meeting_id, last_seen, active)
+                VALUES (:uid, :mid, :now, 1)
+                ON CONFLICT(user_id) DO UPDATE SET
+                    meeting_id=excluded.meeting_id,
+                    last_seen=excluded.last_seen,
+                    active=1
+                """
+            ),
+            {"uid": user_id, "mid": meeting_id, "now": datetime.now(timezone.utc)},
+        )
+        await session.commit()
+
+
+async def get_active_meeting(user_id: str, max_age_minutes: int = 10) -> str | None:
+    """Return meeting_id if active and recent."""
+    cutoff = datetime.now(timezone.utc) - timedelta(minutes=max_age_minutes)
+    async with SessionLocal() as session:
+        result = await session.execute(
+            text(
+                """
+                SELECT meeting_id FROM meeting_sessions
+                WHERE user_id = :uid AND active = 1 AND last_seen >= :cutoff
+                """
+            ),
+            {"uid": user_id, "cutoff": cutoff},
+        )
+        row = result.fetchone()
+        return row[0] if row else None
+
+
+async def mark_meeting_stopped(user_id: str) -> None:
+    async with SessionLocal() as session:
+        await session.execute(
+            text("UPDATE meeting_sessions SET active = 0 WHERE user_id = :uid"),
+            {"uid": user_id},
+        )
+        await session.commit()
+
+
+async def prune_expired_reset_tokens() -> None:
+    """Delete expired or stale reset tokens."""
+    async with SessionLocal() as session:
+        await session.execute(
+            text(
+                "DELETE FROM password_reset_tokens "
+                "WHERE expires_at < :now OR (used_at IS NOT NULL AND used_at < :week_ago)"
+            ),
+            {
+                "now": datetime.now(timezone.utc),
+                "week_ago": datetime.now(timezone.utc) - timedelta(days=7),
+            },
+        )
+        await session.commit()
+
+
+async def prune_old_doc_jobs(days: int = 14) -> None:
+    """Delete old ingestion jobs to keep table size bounded."""
+    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+    async with SessionLocal() as session:
+        await session.execute(
+            text("DELETE FROM doc_ingestion_jobs WHERE updated_at < :cutoff"),
+            {"cutoff": cutoff},
+        )
+        await session.commit()
+
+
+
+
+
+def _hash_token(token: str) -> str:
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+async def create_reset_token(user_id: str, ttl_hours: int = 1) -> str:
+    """Create and store a password reset token; returns the raw token."""
+    token = secrets.token_urlsafe(32)
+    token_hash = _hash_token(token)
+    expires_at = datetime.now(timezone.utc) + timedelta(hours=ttl_hours)
+
+    async with SessionLocal() as session:
+        session.add(
+            PasswordResetToken(
+                user_id=user_id,
+                token_hash=token_hash,
+                expires_at=expires_at,
+            )
+        )
+        await session.commit()
+    return token
+
+
+async def validate_reset_token(raw_token: str) -> User | None:
+    """Return the associated user if token is valid, unexpired, and unused."""
+    token_hash = _hash_token(raw_token)
+    async with SessionLocal() as session:
+        result = await session.execute(
+            select(PasswordResetToken).where(PasswordResetToken.token_hash == token_hash)
+        )
+        record: PasswordResetToken | None = result.scalars().first()
+        if (
+            record
+            and record.used_at is None
+            and record.expires_at > datetime.now(timezone.utc)
+        ):
+            user_result = await session.execute(
+                select(User).where(User.email == record.user_id)
+            )
+            return user_result.scalars().first()
+    return None
+
+
+async def mark_reset_token_used(raw_token: str) -> None:
+    """Mark a reset token as used."""
+    token_hash = _hash_token(raw_token)
+    async with SessionLocal() as session:
+        await session.execute(
+            text(
+                "UPDATE password_reset_tokens "
+                "SET used_at = :used_at "
+                "WHERE token_hash = :token_hash"
+            ),
+            {"used_at": datetime.now(timezone.utc), "token_hash": token_hash},
+        )
+        await session.commit()
+
+
+
 
 
 async def add_message(user_id: str, role: str, content: str) -> None:
@@ -224,9 +433,7 @@ async def clear_history(user_id: str) -> None:
         await session.commit()
 
 
-# ---------------------------------------------------------------------------
-# Meeting operations
-# ---------------------------------------------------------------------------
+
 
 
 async def save_meeting_chunk(user_id: str, meeting_id: str, text_content: str) -> None:
@@ -269,6 +476,19 @@ async def save_meeting_summary(user_id: str, meeting_id: str, summary: str) -> N
                     summary=summary,
                 )
             )
+        await session.commit()
+
+
+async def save_periodic_summary(user_id: str, meeting_id: str, summary: str) -> None:
+    """Persist a periodic (in-meeting) summary snapshot."""
+    async with SessionLocal() as session:
+        session.add(
+            MeetingPeriodicSummary(
+                user_id=user_id,
+                meeting_id=meeting_id,
+                summary=summary,
+            )
+        )
         await session.commit()
 
 

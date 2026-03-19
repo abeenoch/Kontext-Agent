@@ -1,76 +1,67 @@
-import { useState } from 'react';
-import ChatPanel from '../components/ChatPanel';
-import api from '../services/api';
 import { Trash2, Upload, Sparkles, CircleHelp, Database } from 'lucide-react';
+import ChatPanel from '../components/ChatPanel';
+import { useChat } from '../context/ChatContext';
+import api from '../services/api';
+import { useEffect, useState } from 'react';
+import useInterval from '../hooks/useInterval';
 
 export default function ChatPage() {
-    const [messages, setMessages] = useState([]);
-    const [isLoading, setIsLoading] = useState(false);
-    const [isUploading, setIsUploading] = useState(false);
-    const [uploadStatus, setUploadStatus] = useState(null);
+    const {
+        messages,
+        isLoading,
+        isUploading,
+        uploadStatus,
+        llmStatus,
+        sendMessage,
+        clearMessages,
+        uploadDoc,
+        clearDocs,
+        setUploadStatus,
+    } = useChat();
+    const [recentJobs, setRecentJobs] = useState([]);
+    const [jobStatuses, setJobStatuses] = useState({});
+
+    useEffect(() => {
+        try {
+            const stored = localStorage.getItem('doc_jobs');
+            setRecentJobs(stored ? JSON.parse(stored) : []);
+        } catch {
+            setRecentJobs([]);
+        }
+    }, [uploadStatus]);
+
+    // Poll job status for recent uploads
+    useInterval(async () => {
+        if (!recentJobs.length) return;
+        const updated = {};
+        for (const job of recentJobs.slice(0, 3)) {
+            try {
+                const res = await api.get(`/docs/status/${job.jobId}`);
+                updated[job.jobId] = res.data.status;
+            } catch {
+                // ignore
+            }
+        }
+        if (Object.keys(updated).length) {
+            setJobStatuses((prev) => ({ ...prev, ...updated }));
+        }
+    }, 4000);
 
     const handleSendMessage = async (text, voiceAudio = null) => {
-        setIsLoading(true);
-
-        const userMsg = { role: 'user', content: text || 'Message' };
-        setMessages(prev => [...prev, userMsg]);
-
-        try {
-            const payload = {
-                query: text,
-                voice_audio: voiceAudio
-            };
-
-            const response = await api.post('/chat/query', payload);
-            const { response: aiText } = response.data;
-
-            setMessages(prev => [...prev, {
-                role: 'assistant',
-                content: aiText
-            }]);
-        } catch (error) {
-            console.error('Chat error:', error);
-            setMessages(prev => [...prev, {
-                role: 'assistant',
-                content: 'Error processing request.',
-                error: true
-            }]);
-        } finally {
-            setIsLoading(false);
-        }
+        await sendMessage(text, voiceAudio);
     };
 
     const handleFileUpload = async (e) => {
         const file = e.target.files?.[0];
         if (!file) return;
-
-        setIsUploading(true);
-        setUploadStatus(null);
-
-        const formData = new FormData();
-        formData.append('file', file);
-
-        try {
-            await api.post('/docs/upload', formData, {
-                headers: { 'Content-Type': 'multipart/form-data' }
-            });
-            setUploadStatus({ type: 'success', message: `Uploaded ${file.name}` });
-        } catch (error) {
-            setUploadStatus({
-                type: 'error',
-                message: error.response?.data?.detail || 'Upload failed'
-            });
-        } finally {
-            setIsUploading(false);
-            e.target.value = '';
-        }
+        await uploadDoc(file);
+        e.target.value = '';
     };
 
     const handleClearDocs = async () => {
         if (!confirm('Clear all uploaded documents?')) return;
         try {
-            await api.delete('/docs/clear');
-            setUploadStatus({ type: 'success', message: 'Knowledge base cleared' });
+            await clearDocs();
         } catch (_error) {
             setUploadStatus({ type: 'error', message: 'Failed to clear documents' });
         }
@@ -80,10 +71,10 @@ export default function ChatPage() {
         if (!confirm('Clear chat history?')) return;
         try {
             await api.delete('/chat/history');
-            setMessages([]);
         } catch (error) {
             console.error('Clear history error:', error);
         }
+        clearMessages();
     };
 
     return (
@@ -127,6 +118,21 @@ export default function ChatPage() {
                             {uploadStatus.message}
                         </p>
                     )}
+                    {recentJobs.length > 0 && (
+                        <div className="mt-3 text-xs text-slate-600">
+                            <div className="font-semibold text-slate-800 mb-1">Recent ingestion jobs</div>
+                            <ul className="space-y-1">
+                                {recentJobs.slice(0,3).map((j) => (
+                                    <li key={j.jobId} className="flex items-center justify-between">
+                                        <span className="truncate max-w-[140px]">{j.filename}</span>
+                                        <span className="text-[11px] text-slate-500">
+                                            {jobStatuses[j.jobId] ? jobStatuses[j.jobId] : `${j.jobId.slice(0,8)}...`}
+                                        </span>
+                                    </li>
+                                ))}
+                            </ul>
+                        </div>
+                    )}
                     <div className="flex items-center gap-2 mt-4">
                         <button
                             onClick={handleClearDocs}
@@ -142,6 +148,11 @@ export default function ChatPage() {
                             Clear Chat
                         </button>
                     </div>
+                    {llmStatus && (
+                        <div className={`mt-3 text-xs px-3 py-2 rounded-lg ${llmStatus.type === 'warning' ? 'bg-amber-50 text-amber-700 border border-amber-200' : 'bg-rose-50 text-rose-700 border border-rose-200'}`}>
+                            {llmStatus.message}
+                        </div>
+                    )}
                 </div>
             </aside>
 

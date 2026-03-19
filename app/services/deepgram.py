@@ -1,11 +1,3 @@
-"""
-Unified Deepgram service for speech-to-text, text-to-speech, and diarization.
-
-Uses Deepgram Python SDK v5 with:
-- Listen v1 REST and WebSocket for STT
-- Speak v1 REST for TTS
-"""
-
 import asyncio
 import time
 from dataclasses import dataclass, field
@@ -83,12 +75,12 @@ class DeepgramSTTHandler:
         self._on_error = on_error
 
         try:
-            logger.info("Connecting to Deepgram STT (timeout=10s)...")
+            logger.info("Connecting to Deepgram STT (timeout=20s)...")
             self._client = AsyncDeepgramClient(api_key=self.api_key)
             self._task = asyncio.create_task(self._run())
             
             # Wait for connection
-            for i in range(100):
+            for i in range(200):
                 if self.is_connected:
                     logger.info("Deepgram STT connected after %.1fs", (i + 1) * 0.1)
                     return True
@@ -101,7 +93,7 @@ class DeepgramSTTHandler:
                 await asyncio.sleep(0.1)
             
             if not self.is_connected:
-                logger.error("Deepgram connection timed out after 10s")
+                logger.error("Deepgram connection timed out after 20s")
                 await self.disconnect() 
                 return False
 
