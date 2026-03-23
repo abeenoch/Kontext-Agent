@@ -3,7 +3,7 @@ from pydantic import BaseModel
 
 from app.auth import get_current_user
 from app.services.llm_agent import query_llm
-from app.services.rag_pipeline import retrieve_docs
+from app.services.rag_pipeline import retrieve_docs, list_user_docs
 from app.services.chat_memory import add_message, get_recent_history, clear_history
 from app.services.audio import process_browser_audio
 from app.config import get_settings
@@ -18,6 +18,7 @@ router = APIRouter(prefix="/chat", tags=["Chat"])
 class ChatRequest(BaseModel):
     """Chat query request body."""
     query: str
+    tab_id: str
     voice_audio: str | None = None  
 
 
@@ -71,15 +72,19 @@ async def chat_query(
     sources_used = False
     rag_context = ""
     try:
-        docs = await retrieve_docs(user_id, query)
+        docs = await retrieve_docs(user_id, request.tab_id, query)
         if docs:
             rag_context = "\n\n".join(docs)
             sources_used = True
     except Exception as exc:
         logger.warning("RAG retrieval error: %s", exc)
 
+    # Gather known doc filenames for graceful prompting
+    doc_list = list_user_docs(user_id, request.tab_id)
+    doc_names = [d["filename"] for d in doc_list]
+
     # Get conversation history
-    history = await get_recent_history(user_id, limit=5)
+    history = await get_recent_history(user_id, limit=5, tab_id=request.tab_id)
     history_text = ""
     for msg in history:
         role_label = "User" if msg["role"] == "user" else "Assistant"
@@ -95,8 +100,22 @@ async def chat_query(
             f"User: {query}\n\nAssistant:"
         )
     else:
+        doc_hint = ""
+        if doc_names:
+            latest_name = doc_names[0]
+            others = doc_names[1:5]
+            extra = f" Other uploads: {', '.join(others)}." if others else ""
+            doc_hint = (
+                f"The most recently uploaded document is '{latest_name}'.{extra} "
+                "You do NOT have their full contents in this message. "
+                "If the user's intent is about documents, assume they likely mean the most recent one unless they specify otherwise. "
+                "State that you're using the latest document by default, and invite them to name a different file if needed. "
+                "Do not invent details not present in retrieved context.\n\n"
+            )
+
         prompt = (
             "You are a helpful AI assistant.\n\n"
+            f"{doc_hint}"
             f"History:\n{history_text}\n\n"
             f"User: {query}\n\nAssistant:"
         )
@@ -104,8 +123,8 @@ async def chat_query(
     try:
         response = await query_llm(prompt)
 
-        await add_message(user_id, "user", query)
-        await add_message(user_id, "assistant", response)
+        await add_message(user_id, "user", query, tab_id=request.tab_id)
+        await add_message(user_id, "assistant", response, tab_id=request.tab_id)
 
         return ChatResponse(response=response, sources_used=sources_used)
 

@@ -19,6 +19,7 @@ export function MeetingProvider({ children }) {
   const [status, setStatus] = useState(null);
   const [chatMessages, setChatMessages] = useState([]);
   const [isChatLoading, setIsChatLoading] = useState(false);
+  const [awaitingFinal, setAwaitingFinal] = useState(false);
 
   const { isRecording, startCapture, stopCapture, sampleRate } = useAudioCapture();
 
@@ -29,6 +30,7 @@ export function MeetingProvider({ children }) {
           setMeetingId(data.meeting_id);
         }
         setStatus({ type: 'success', message: 'Connected' });
+        setAwaitingFinal(false);
         break;
       case 'status':
         setStatus({
@@ -54,9 +56,13 @@ export function MeetingProvider({ children }) {
       case 'final_summary':
         setSummary(data.summary);
         setStatus({ type: 'success', message: 'Summary ready' });
+        setAwaitingFinal(false);
+        // Graceful close after final summary to avoid missing message
+        setTimeout(() => disconnect(), 300);
         break;
       case 'error':
         setStatus({ type: 'error', message: data.message });
+        setAwaitingFinal(false);
         break;
       default:
         break;
@@ -108,11 +114,12 @@ export function MeetingProvider({ children }) {
   }, [connect, sendMessage, startCapture, sampleRate, wsToken, isRecording, disconnect]);
 
   const stopMeeting = useCallback(() => {
-    disableReconnect();
-    stopCapture();
+    stopCapture(); // stop mic immediately
+    disableReconnect(); // don't reconnect, but keep socket open for final summary
+    setAwaitingFinal(true);
+    setStatus({ type: 'loading', message: 'Generating final summary...' });
     sendMessage('STOP');
-    disconnect();
-  }, [disableReconnect, stopCapture, sendMessage, disconnect]);
+  }, [disableReconnect, stopCapture, sendMessage]);
 
   const sendEmail = useCallback(() => {
     if (!meetingId) return;
@@ -128,17 +135,14 @@ export function MeetingProvider({ children }) {
 
   const sendMeetingChat = useCallback(
     async (text, voiceAudio = null) => {
-      if (!meetingId) {
-        setStatus({ type: 'error', message: 'No active meeting context' });
-        return;
-      }
+      const targetMeetingId = meetingId || 'recent';
 
       const userMsg = { role: 'user', content: text || '(Voice Message)' };
       setChatMessages((prev) => [...prev, userMsg]);
       setIsChatLoading(true);
 
       try {
-        const response = await api.post(`/meeting/${meetingId}/chat`, {
+        const response = await api.post(`/meeting/${targetMeetingId}/chat`, {
           query: text,
           voice_audio: voiceAudio,
         });
@@ -146,10 +150,12 @@ export function MeetingProvider({ children }) {
         setChatMessages((prev) => [...prev, aiMsg]);
       } catch (error) {
         console.error('Chat error:', error);
-        setChatMessages((prev) => [
-          ...prev,
-          { role: 'assistant', content: 'Sorry, I encountered an error answering your question.' },
-        ]);
+        const detail =
+          error.response?.data?.detail ||
+          (error.response?.status === 503
+            ? 'LLM temporarily unavailable. Please retry.'
+            : 'Sorry, I encountered an error answering your question.');
+        setChatMessages((prev) => [...prev, { role: 'assistant', content: detail }]);
       } finally {
         setIsChatLoading(false);
       }

@@ -7,6 +7,8 @@ from fastapi import (
     UploadFile,
     status,
     BackgroundTasks,
+    Form,
+    Query,
 )
 from pydantic import BaseModel
 
@@ -71,8 +73,9 @@ class ClearDocsResponse(BaseModel):
 async def get_job_status(
     job_id: str,
     user_id: str = Depends(get_current_user),
+    tab_id: str = Query(..., description="Tab id for this job"),
 ) -> JobStatusResponse:
-    job = await get_job(job_id, user_id)
+    job = await get_job(job_id, user_id, tab_id)
     if not job:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job not found")
     return JobStatusResponse(
@@ -88,6 +91,7 @@ async def get_job_status(
 @router.post("/upload", response_model=UploadResponse)
 async def upload_document(
     file: UploadFile = File(...),
+    tab_id: str = Form(..., description="Tab id for this upload"),
     background_tasks: BackgroundTasks = None,
     user_id: str = Depends(get_current_user),
 ) -> UploadResponse:
@@ -108,10 +112,10 @@ async def upload_document(
     validate_file_size(len(content), MAX_FILE_SIZE_MB)
 
     try:
-        job_id = await create_doc_job(user_id, file.filename)
+        job_id = await create_doc_job(user_id, file.filename, tab_id)
         # enqueue background ingestion
-        background_tasks.add_task(process_doc_job, job_id, user_id, file.filename, content)
-        logger.info("Doc upload queued: %s by %s (job=%s)", file.filename, user_id, job_id)
+        background_tasks.add_task(process_doc_job, job_id, user_id, tab_id, file.filename, content)
+        logger.info("Doc upload queued: %s by %s (job=%s, tab=%s)", file.filename, user_id, job_id, tab_id)
         return UploadResponse(
             filename=file.filename,
             status="queued",
@@ -128,11 +132,12 @@ async def upload_document(
 @router.delete("/clear", response_model=ClearDocsResponse)
 async def clear_documents(
     user_id: str = Depends(get_current_user),
+    tab_id: str = Query(..., description="Tab id to clear"),
 ) -> ClearDocsResponse:
     """Clear all uploaded documents for the current user."""
     try:
-        await clear_user_docs(user_id)
-        logger.info("Documents cleared for user: %s", user_id)
+        await clear_user_docs(user_id, tab_id)
+        logger.info("Documents cleared for user: %s tab %s", user_id, tab_id)
         return ClearDocsResponse(status="cleared")
     except Exception as exc:
         logger.error("Error clearing docs: %s", exc)
@@ -146,6 +151,7 @@ async def clear_documents(
 async def docs_chat(
     request: DocsChatRequest,
     user_id: str = Depends(get_current_user),
+    tab_id: str = Query(..., description="Tab id for RAG retrieval"),
 ) -> DocsChatResponse:
     """
     Dual-mode chat endpoint for the docs page.
@@ -180,7 +186,7 @@ async def docs_chat(
 
     # If a specific job was provided, ensure it's complete before chatting.
     if request.job_id:
-        job = await get_job(request.job_id, user_id)
+        job = await get_job(request.job_id, user_id, tab_id)
         if not job:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -198,7 +204,7 @@ async def docs_chat(
     rag_context = ""
     if request.use_rag:
         try:
-            docs = await retrieve_docs(user_id, query)
+            docs = await retrieve_docs(user_id, tab_id, query)
             if docs:
                 rag_context = "\n\n".join(docs)
                 sources_used = True
@@ -206,7 +212,8 @@ async def docs_chat(
             logger.warning("RAG retrieval failed: %s", exc)
 
     # Build prompt
-    history = await get_recent_history(user_id, limit=3)
+    history_limit = 0 if sources_used else 3
+    history = await get_recent_history(user_id, limit=history_limit, tab_id=tab_id) if history_limit > 0 else []
     history_text = ""
     for msg in history:
         role_label = "User" if msg["role"] == "user" else "Assistant"

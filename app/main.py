@@ -6,6 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.services.chat_memory import init_db
 from app.config import get_settings
 from app.logger import get_logger
+from app.utils.embedding_utils import preload_embedding_model
 
 logger = get_logger(__name__)
 settings = get_settings()
@@ -18,6 +19,10 @@ async def lifespan(application: FastAPI):
     logger.info("Starting Kontext Agent")
     await init_db()
     logger.info("Database initialized")
+    try:
+        preload_embedding_model()
+    except Exception as exc:
+        logger.warning("Embedding model preload failed (will lazy-load later): %s", exc)
     yield
     logger.info("Shutting down Kontext Agent")
 

@@ -32,9 +32,7 @@ export default function Navbar() {
 
                     {/* Logo */}
                     <Link to="/" className="flex items-center space-x-2 font-bold text-xl text-slate-900">
-                        <div className="w-8 h-8 bg-gradient-to-br from-amber-400 to-orange-500 rounded-lg flex items-center justify-center shadow-sm">
-                            <span className="text-white text-lg">K</span>
-                        </div>
+                        <img src="/src/assets/logo-k.svg" alt="Kontext" className="w-8 h-8 rounded-lg shadow-sm" />
                         <span>Kontext</span>
                     </Link>
 

@@ -40,6 +40,7 @@ class ChatMessage(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(String, index=True)
+    tab_id = Column(String, index=True, nullable=True)
     role = Column(String)  # "user" | "assistant"
     content = Column(Text)
     timestamp = Column(Float)
@@ -118,6 +119,7 @@ class DocIngestionJob(Base):
     id = Column(String, primary_key=True, index=True)  # UUID
     user_id = Column(String, index=True, nullable=False)
     filename = Column(String, nullable=False)
+    tab_id = Column(String, index=True, nullable=True)
     status = Column(String, nullable=False, default="queued")  # queued | processing | completed | failed
     chunks_ingested = Column(Integer, nullable=True)
     error = Column(Text, nullable=True)
@@ -145,6 +147,34 @@ async def init_db() -> None:
     """Create all tables if they do not exist."""
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        # Add tab_id columns if missing
+        try:
+            await conn.execute(
+                text("ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS tab_id VARCHAR")
+            )
+        except Exception:
+            try:
+                await conn.execute(text("ALTER TABLE chat_messages ADD COLUMN tab_id VARCHAR"))
+            except Exception:
+                pass
+
+        # Add tab_id column to doc_ingestion_jobs if missing (Postgres/SQLite tolerant)
+        try:
+            await conn.execute(
+                text(
+                    "ALTER TABLE doc_ingestion_jobs "
+                    "ADD COLUMN IF NOT EXISTS tab_id VARCHAR"
+                )
+            )
+        except Exception:
+            # SQLite older versions don't support IF NOT EXISTS; try plain add
+            try:
+                await conn.execute(
+                    text("ALTER TABLE doc_ingestion_jobs ADD COLUMN tab_id VARCHAR")
+                )
+            except Exception:
+                pass
+
     await prune_expired_reset_tokens()
     await prune_old_doc_jobs()
 
@@ -196,7 +226,7 @@ async def update_user_password(email: str, password_hash: str) -> None:
 
 
 
-async def create_doc_job(user_id: str, filename: str) -> str:
+async def create_doc_job(user_id: str, filename: str, tab_id: str | None = None) -> str:
     """Create a new doc ingestion job and return its id."""
     job_id = str(uuid4())
     async with SessionLocal() as session:
@@ -205,6 +235,7 @@ async def create_doc_job(user_id: str, filename: str) -> str:
                 id=job_id,
                 user_id=user_id,
                 filename=filename,
+                tab_id=tab_id,
                 status="queued",
             )
         )
@@ -248,6 +279,7 @@ async def get_doc_job(job_id: str) -> dict | None:
             "id": job.id,
             "user_id": job.user_id,
             "filename": job.filename,
+            "tab_id": job.tab_id,
             "status": job.status,
             "chunks_ingested": job.chunks_ingested,
             "error": job.error,
@@ -396,12 +428,13 @@ async def mark_reset_token_used(raw_token: str) -> None:
 
 
 
-async def add_message(user_id: str, role: str, content: str) -> None:
+async def add_message(user_id: str, role: str, content: str, tab_id: str | None = None) -> None:
     """Persist a chat message."""
     async with SessionLocal() as session:
         session.add(
             ChatMessage(
                 user_id=user_id,
+                tab_id=tab_id,
                 role=role,
                 content=content,
                 timestamp=time.time(),
@@ -410,14 +443,15 @@ async def add_message(user_id: str, role: str, content: str) -> None:
         await session.commit()
 
 
-async def get_recent_history(user_id: str, limit: int = 5) -> list[dict[str, str]]:
-    """Return the last *limit* messages for a user, oldest first."""
+async def get_recent_history(user_id: str, limit: int = 5, tab_id: str | None = None) -> list[dict[str, str]]:
+    """Return the last *limit* messages for a user (and tab if provided), oldest first."""
     async with SessionLocal() as session:
+        stmt = select(ChatMessage).where(ChatMessage.user_id == user_id)
+        if tab_id is not None:
+            stmt = stmt.where(ChatMessage.tab_id == tab_id)
+        stmt = stmt.order_by(ChatMessage.timestamp.desc()).limit(limit)
         result = await session.execute(
-            select(ChatMessage)
-            .where(ChatMessage.user_id == user_id)
-            .order_by(ChatMessage.timestamp.desc())
-            .limit(limit)
+            stmt
         )
         messages = result.scalars().all()
         return [{"role": m.role, "content": m.content} for m in reversed(messages)]

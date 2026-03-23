@@ -62,6 +62,36 @@ export const AuthProvider = ({ children }) => {
         }
     };
 
+    const requestPasswordReset = async (email) => {
+        try {
+            const response = await api.post('/auth/forgot-password', { email });
+            // Backend may return reset_token when email service isn't configured
+            return {
+                success: true,
+                resetToken: response.data?.reset_token || null
+            };
+        } catch (error) {
+            console.error('Forgot password failed:', error);
+            return {
+                success: false,
+                message: error.response?.data?.detail || 'Unable to start password reset'
+            };
+        }
+    };
+
+    const resetPassword = async (token, newPassword) => {
+        try {
+            await api.post('/auth/reset-password', { token, new_password: newPassword });
+            return { success: true };
+        } catch (error) {
+            console.error('Reset password failed:', error);
+            return {
+                success: false,
+                message: error.response?.data?.detail || 'Reset link is invalid or expired'
+            };
+        }
+    };
+
   const logout = () => {
     localStorage.removeItem('token');
     localStorage.removeItem('user');
@@ -71,7 +101,17 @@ export const AuthProvider = ({ children }) => {
   };
 
     return (
-        <AuthContext.Provider value={{ user, login, signup, logout, loading }}>
+        <AuthContext.Provider
+            value={{
+                user,
+                login,
+                signup,
+                logout,
+                loading,
+                requestPasswordReset,
+                resetPassword
+            }}
+        >
             {children}
         </AuthContext.Provider>
     );

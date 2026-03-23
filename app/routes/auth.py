@@ -83,7 +83,9 @@ async def signup(request: SignupRequest, http_request: Request) -> AuthResponse:
             detail="Too many signup attempts. Please retry later.",
         )
 
-    existing = await get_user_by_email(request.email)
+    normalized_email = request.email.lower()
+
+    existing = await get_user_by_email(normalized_email)
     if existing is not None:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -99,7 +101,7 @@ async def signup(request: SignupRequest, http_request: Request) -> AuthResponse:
     try:
         hashed = hash_password(request.password)
         user = await create_user(
-            email=request.email,
+            email=normalized_email,
             password_hash=hashed,
             display_name=request.display_name,
         )
@@ -147,7 +149,8 @@ async def login(request: LoginRequest, http_request: Request) -> AuthResponse:
             detail="Too many login attempts. Please retry later.",
         )
 
-    user = await get_user_by_email(request.email)
+    normalized_email = request.email.lower()
+    user = await get_user_by_email(normalized_email)
     if user is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -175,7 +178,8 @@ async def forgot_password(payload: ForgotPasswordRequest):
     Initiate password reset. Returns 200 regardless of user existence to prevent enumeration.
     """
     try:
-        user = await get_user_by_email(payload.email)
+        email = payload.email.lower()
+        user = await get_user_by_email(email)
         if user:
             token = await create_reset_token(user.email)
             sent = send_password_reset_email(user.email, token)

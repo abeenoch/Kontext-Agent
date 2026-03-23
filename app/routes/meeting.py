@@ -40,6 +40,7 @@ from app.auth import get_current_user, get_current_user_ws
 from app.config import get_settings
 from app.logger import get_logger
 from app.validators import validate_meeting_id
+import httpx
 
 logger = get_logger(__name__)
 settings = get_settings()
@@ -252,12 +253,28 @@ async def meeting_websocket(websocket: WebSocket) -> None:
 
         deepgram_handler = build_stt_handler(current_sample_rate)
 
-        if not await deepgram_handler.connect(
-            on_transcript=on_transcript, on_error=on_error
-        ):
+        async def try_connect(attempt: int) -> bool:
+            if await deepgram_handler.connect(
+                on_transcript=on_transcript, on_error=on_error
+            ):
+                return True
+            logger.warning("Deepgram connect attempt %d failed", attempt)
+            return False
+
+        connected = await try_connect(1)
+        if not connected:
+            await asyncio.sleep(2)
+            deepgram_handler = build_stt_handler(current_sample_rate)
+            connected = await try_connect(2)
+
+        if not connected:
             await safe_send_json(
-                {"type": "error", "message": "Failed to connect to Deepgram"}
+                {
+                    "type": "error",
+                    "message": "Unable to connect to transcription service. Please retry.",
+                }
             )
+            await websocket.close()
             return
 
         await safe_send_json(
@@ -606,7 +623,9 @@ async def meeting_chat(
 
     Accepts text or optional voice input (base64 PCM audio).
     """
-    validate_meeting_id(meeting_id)
+    special_any = meeting_id in {"recent", "any", "latest"}
+    if not special_any:
+        validate_meeting_id(meeting_id)
     query = request.query
 
     # Handle voice input: transcribe audio to text
@@ -629,6 +648,47 @@ async def meeting_chat(
             detail="Query cannot be empty",
         )
 
+    query_lower = query.lower()
+
+    # If special "recent"/"any" mode: search across all meetings via vector DB
+    if special_any:
+        try:
+            context_chunks = await query_meetings(
+                user_id=current_user,
+                query=query,
+                meeting_id=None,
+                n_results=8,
+            )
+        except Exception as exc:
+            logger.warning("Global meeting RAG retrieval failed: %s", exc)
+            context_chunks = []
+
+        if not context_chunks:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="No past meetings available for this query.",
+            )
+
+        global_context = "\n\n".join(context_chunks)
+        prompt = (
+            "You are an AI meeting assistant. Answer the user's question using the past meeting context below.\n\n"
+            f"Context snippets:\n{global_context}\n\n"
+            f"User question: {query}\n\n"
+            "Provide a clear, helpful answer grounded in the provided context."
+        )
+
+        try:
+            response_text = await query_llm(prompt)
+            return MeetingChatResponse(response=response_text)
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code == 503:
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail="LLM provider temporarily unavailable. Please retry shortly.",
+                )
+            raise
+
+    # -------- Standard meeting-specific flow -----------------------------
     transcript = await get_meeting_transcript(current_user, meeting_id)
     if not transcript:
         raise HTTPException(
@@ -636,7 +696,6 @@ async def meeting_chat(
             detail="Meeting transcript not found",
         )
 
-    query_lower = query.lower()
     summary = await get_meeting_summary(current_user, meeting_id)
 
     # Vector-powered retrieval scoped to this meeting for efficient context.
@@ -717,6 +776,19 @@ async def meeting_chat(
         context_blocks.append("Transcript Excerpts:\n" + "\n\n".join(context_chunks))
     if not context_blocks:
         context_blocks.append(f"Full Transcript:\n{transcript}")
+
+    # Add cross-meeting supporting context
+    try:
+        cross_meeting = await query_meetings(
+            user_id=current_user,
+            query=query,
+            meeting_id=None,
+            n_results=3,
+        )
+        if cross_meeting:
+            context_blocks.append("Relevant snippets from other meetings:\n" + "\n\n".join(cross_meeting))
+    except Exception as exc:
+        logger.debug("Cross-meeting RAG retrieval failed: %s", exc)
 
     context_joined = "\n\n".join(context_blocks)
 

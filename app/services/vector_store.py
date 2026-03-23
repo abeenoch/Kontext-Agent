@@ -26,7 +26,9 @@ def _slugify(user_id: str) -> str:
     return _SAFE_PATTERN.sub("_", user_id)
 
 
-def docs_collection_name(user_id: str) -> str:
+def docs_collection_name(user_id: str, tab_id: str | None = None) -> str:
+    if tab_id:
+        return f"docs_{_slugify(user_id)}_{_slugify(tab_id)}"
     return f"docs_{_slugify(user_id)}"
 
 
@@ -53,24 +55,24 @@ def _maybe_get(name: str):
         return None
 
 
-async def ensure_user_collections(user_id: str) -> None:
-    """Create docs + meetings collections for a user if missing."""
+async def ensure_user_collections(user_id: str, tab_id: str | None = None) -> None:
+    """Create docs + meetings collections for a user (and tab) if missing."""
     loop = asyncio.get_running_loop()
     await loop.run_in_executor(
         None,
         lambda: (
-            _get_or_create(docs_collection_name(user_id)),
+            _get_or_create(docs_collection_name(user_id, tab_id)),
             _get_or_create(meetings_collection_name(user_id)),
         ),
     )
 
 
-def get_docs_collection(user_id: str):
+def get_docs_collection(user_id: str, tab_id: str | None = None):
     """
-    Return the docs collection for a user, falling back to the legacy name
+    Return the docs collection for a user (and tab), falling back to the legacy name
     if it still contains data.
     """
-    new_col = _get_or_create(docs_collection_name(user_id))
+    new_col = _get_or_create(docs_collection_name(user_id, tab_id))
     try:
         if new_col.count() > 0:
             return new_col
@@ -91,15 +93,23 @@ def get_meetings_collection(user_id: str):
     return _get_or_create(meetings_collection_name(user_id))
 
 
-async def clear_docs_collection(user_id: str) -> None:
-    """Delete docs collections (new + legacy) for a user."""
+async def clear_docs_collection(user_id: str, tab_id: str | None = None) -> None:
+    """Delete docs collections (new + legacy) for a user; if tab_id is None, clear all tabs."""
     loop = asyncio.get_running_loop()
 
     def _delete():
-        for name in {
-            docs_collection_name(user_id),
+        names = {
+            docs_collection_name(user_id, tab_id),
             legacy_docs_collection_name(user_id),
-        }:
+        }
+        if tab_id is None:
+            try:
+                for col in _client.list_collections():
+                    if col.name.startswith(f"docs_{_slugify(user_id)}_"):
+                        names.add(col.name)
+            except Exception:
+                pass
+        for name in names:
             try:
                 _client.delete_collection(name=name)
             except Exception:
