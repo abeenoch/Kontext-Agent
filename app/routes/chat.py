@@ -18,7 +18,7 @@ router = APIRouter(prefix="/chat", tags=["Chat"])
 class ChatRequest(BaseModel):
     """Chat query request body."""
     query: str
-    tab_id: str
+    tab_id: str = "default"
     voice_audio: str | None = None  
 
 
@@ -73,6 +73,12 @@ async def chat_query(
     rag_context = ""
     try:
         docs = await retrieve_docs(user_id, request.tab_id, query)
+        if docs:
+            rag_context = "\n\n".join(docs)
+            sources_used = True
+    except TypeError:
+        # Backward compatibility for test stubs that accept (user_id, query)
+        docs = await retrieve_docs(user_id, query)  # type: ignore[arg-type]
         if docs:
             rag_context = "\n\n".join(docs)
             sources_used = True

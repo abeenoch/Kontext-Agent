@@ -3,6 +3,29 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+# Starlette 1.x removed `on_startup/on_shutdown` kwargs; FastAPI still passes them
+# in older compatibility paths. Patch Router.__init__ to ignore these extras so we
+# can run with the bundled Starlette version when dependency pinning is unavailable.
+try:  # pragma: no cover - defensive compatibility shim
+    import starlette.routing as _sr
+
+    _orig_router_init = _sr.Router.__init__
+
+    def _patched_router_init(self, *args, **kwargs):
+        kwargs.pop("on_startup", None)
+        kwargs.pop("on_shutdown", None)
+        result = _orig_router_init(self, *args, **kwargs)
+        # Starlette 1.x no longer sets these attributes; FastAPI still expects them.
+        if not hasattr(self, "on_startup"):
+            self.on_startup = []
+        if not hasattr(self, "on_shutdown"):
+            self.on_shutdown = []
+        return result
+
+    _sr.Router.__init__ = _patched_router_init
+except Exception:
+    pass
+
 from app.services.chat_memory import init_db
 from app.config import get_settings
 from app.logger import get_logger

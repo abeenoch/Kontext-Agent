@@ -1,4 +1,4 @@
-fastapi
+fastapi>=0.110
 uvicorn[standard]
 websockets
 pydantic-settings
@@ -7,6 +7,7 @@ sounddevice
 numpy
 groq
 sentence-transformers
+tokenizers>=0.14,<0.19
 pinecone-client
 notion-client
 streamlit
@@ -19,5 +20,7 @@ python-multipart
 colorlog
 passlib==1.7.4
 bcrypt==4.0.1
-
-#pywin32==306; sys_platform == 'win32'
+sqlalchemy>=2.0
+aiosqlite
+pyjwt
+httpx

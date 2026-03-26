@@ -74,14 +74,24 @@ class Settings(BaseSettings):
         """
         Resolve the async SQLAlchemy database URL.
 
-        Raises if DATABASE_URL is not provided.
+        For production, DATABASE_URL must be provided. In development/test, fall back to
+        a local SQLite file (or CHAT_DB_PATH if supplied) so smoke tests and local runs
+        do not require Postgres.
         """
-        if not self.database_url:
-            raise RuntimeError(
-                "DATABASE_URL is required (Postgres). Example: "
-                "'postgresql+asyncpg://user:pass@localhost:5432/kontext_agent'"
-            )
-        return self.database_url
+        if self.database_url:
+            return self.database_url.strip()
+
+        if self.app_env in {"development", "test"}:
+            chat_db_path = os.getenv("CHAT_DB_PATH", "data/dev.db").strip()
+            # Allow passing a full sqlite URL or just a file path.
+            if chat_db_path.startswith("sqlite"):
+                return chat_db_path
+            return f"sqlite+aiosqlite:///{chat_db_path}"
+
+        raise RuntimeError(
+            "DATABASE_URL is required (Postgres recommended). Example: "
+            "'postgresql+asyncpg://user:pass@localhost:5432/kontext_agent'"
+        )
 
     def get_cors_origins(self) -> list[str]:
         """Parse CORS origins from comma-separated env value."""

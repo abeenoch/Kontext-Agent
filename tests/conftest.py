@@ -2,9 +2,19 @@ import os
 import sys
 import types
 import uuid
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
+
+# Ensure the repo root is importable as a package (app/ lives here).
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+# Ensure tests run against a lightweight local SQLite database and test-safe env.
+os.environ.setdefault("APP_ENV", "test")
+os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite:///./test.db")
 
 # Disable Chroma telemetry during tests to avoid background-thread crashes on exit.
 os.environ.setdefault("ANONYMIZED_TELEMETRY", "False")
@@ -48,18 +58,22 @@ if "chromadb" not in sys.modules:
 if "app.services.rag_pipeline" not in sys.modules:
     rag_stub = types.ModuleType("app.services.rag_pipeline")
 
-    async def _stub_ingest_file(user_id, filename, content):
+    async def _stub_ingest_file(user_id, tab_id, filename, content):
         return 1
 
-    async def _stub_retrieve_docs(user_id, query, n_results=3):
+    async def _stub_retrieve_docs(user_id, tab_id, query, n_results=3):
         return []
 
-    async def _stub_clear_user_docs(user_id):
+    async def _stub_clear_user_docs(user_id, tab_id=None):
         return None
+
+    def _stub_list_user_docs(user_id, tab_id, limit=20):
+        return []
 
     rag_stub.ingest_file = _stub_ingest_file
     rag_stub.retrieve_docs = _stub_retrieve_docs
     rag_stub.clear_user_docs = _stub_clear_user_docs
+    rag_stub.list_user_docs = _stub_list_user_docs
     sys.modules["app.services.rag_pipeline"] = rag_stub
 
 from app.main import app

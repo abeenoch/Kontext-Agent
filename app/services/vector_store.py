@@ -3,6 +3,20 @@ import re
 import time
 from typing import Dict, List, Optional
 
+# Chroma's telemetry stack imports LogData from opentelemetry.sdk._logs in some versions;
+# older/newer opentelemetry builds omit it, which can break startup. Patch in a stub
+# before importing chromadb to keep the service bootable.
+try:  # pragma: no cover - defensive compatibility shim
+    import opentelemetry.sdk._logs as _otel_logs
+
+    if not hasattr(_otel_logs, "LogData"):
+        class _LogData:  # minimal placeholder
+            pass
+
+        _otel_logs.LogData = _LogData
+except Exception:
+    pass
+
 import chromadb
 
 from app.config import get_settings
