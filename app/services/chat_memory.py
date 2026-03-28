@@ -288,9 +288,6 @@ async def get_doc_job(job_id: str) -> dict | None:
         }
 
 
-# ---------------------------------------------------------------------------
-# Meeting session helpers
-# ---------------------------------------------------------------------------
 
 
 async def upsert_meeting_session(user_id: str, meeting_id: str) -> None:

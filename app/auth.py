@@ -1,8 +1,3 @@
-"""Authentication and authorization utilities.
-
-Provides JWT-based auth with proper password hashing via passlib/bcrypt.
-Supports signup (user creation) and login (credential verification).
-"""
 
 from datetime import datetime, timedelta, timezone
 from typing import Optional

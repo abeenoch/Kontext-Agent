@@ -3,9 +3,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-# Starlette 1.x removed `on_startup/on_shutdown` kwargs; FastAPI still passes them
-# in older compatibility paths. Patch Router.__init__ to ignore these extras so we
-# can run with the bundled Starlette version when dependency pinning is unavailable.
+
 try:  # pragma: no cover - defensive compatibility shim
     import starlette.routing as _sr
 
