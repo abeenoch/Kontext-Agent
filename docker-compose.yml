@@ -31,12 +31,10 @@ services:
       APP_PORT: 8000
       CORS_ORIGINS: http://localhost:5173
       CHROMA_DIR: /app/chroma_db
-      TRANSCRIPTS_DIR: /app/data/meeting_transcripts
       DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/kontext_agent
     ports:
       - "8000:8000"
     volumes:
-      - ./data:/app/data
       - ./chroma_db:/app/chroma_db
     depends_on:
       postgres:

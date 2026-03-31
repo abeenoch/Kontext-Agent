@@ -1,9 +1,8 @@
 import asyncio
-import hashlib
-from pathlib import Path
 
 from app.auth import verify_token
 from app.config import get_settings
+from app.services.chat_memory import save_meeting_chunk
 
 
 class _FakeDeepgramHandler:
@@ -59,18 +58,8 @@ def test_meeting_stop_cancels_periodic_before_final_summary(client, auth_headers
     meeting_id = "stopflow01"
 
     settings = get_settings()
-    user_scope = hashlib.sha256(user_id.encode("utf-8")).hexdigest()[:12]
-    transcript_path = Path(settings.transcripts_dir) / f"transcript_{user_scope}_{meeting_id}.txt"
-    transcript_path.parent.mkdir(parents=True, exist_ok=True)
-
-    # Ensure transcript is long enough so final summary path runs query_llm.
-    transcript_path.write_text(
-        "Meeting Transcript - 2026-03-04 10:00:00\n"
-        + "=" * 60
-        + "\n\n"
-        + ("Long transcript line for final summary.\n" * 20),
-        encoding="utf-8",
-    )
+    # Seed the DB with a transcript chunk so final summary path has content.
+    asyncio.run(save_meeting_chunk(user_id, meeting_id, "Long transcript line for final summary. " * 20))
 
     with client.websocket_connect(f"/meeting/ws?token={token}&meeting_id={meeting_id}") as ws:
         first = ws.receive_json()

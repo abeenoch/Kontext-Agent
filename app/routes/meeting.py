@@ -1,7 +1,6 @@
 import asyncio
 import json
 import re
-import hashlib
 import os
 import time
 from datetime import datetime
@@ -26,6 +25,7 @@ from app.services.chat_memory import (
     get_meeting_summary,
     get_meeting_transcript,
     list_meetings,
+    delete_meeting_data,
     upsert_meeting_session,
     get_active_meeting,
     mark_meeting_stopped,
@@ -35,18 +35,18 @@ from app.services.vector_store import (
     add_meeting_chunk_embedding,
     add_meeting_summary_embedding,
     query_meetings,
+    delete_meeting_embeddings,
 )
 from app.auth import get_current_user, get_current_user_ws
 from app.config import get_settings
 from app.logger import get_logger
 from app.validators import validate_meeting_id
+from app.utils.redaction import redact_pii
 import httpx
 
 logger = get_logger(__name__)
 settings = get_settings()
 router = APIRouter(prefix="/meeting", tags=["Meeting"])
-
-os.makedirs(settings.transcripts_dir, exist_ok=True)
 
 # Track active meeting sessions per user to allow reconnect without losing meeting_id.
 _active_meetings: dict[str, dict] = {}
@@ -132,30 +132,14 @@ async def meeting_websocket(websocket: WebSocket) -> None:
     await websocket.accept()
     logger.info("Meeting started: %s", meeting_id)
 
-    user_scope = hashlib.sha256(user_id.encode("utf-8")).hexdigest()[:12]
-
-    transcript_path = os.path.join(
-        settings.transcripts_dir, f"transcript_{user_scope}_{meeting_id}.txt"
-    )
-    summary_path = os.path.join(
-        settings.transcripts_dir, f"summary_{user_scope}_{meeting_id}.txt"
-    )
-
-    if not os.path.exists(transcript_path):
-        with open(transcript_path, "w", encoding="utf-8") as f:
-            f.write(
-                f"Meeting Transcript - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
-            )
-            f.write("=" * 60 + "\n\n")
-
     deepgram_handler: DeepgramSTTHandler | None = None
     meeting_active = True
     summary_task: asyncio.Task | None = None
     keepalive_task: asyncio.Task | None = None
+    ping_task: asyncio.Task | None = None
     current_sample_rate = 16000
     stt_needs_reconnect = False
     reconnect_attempting = False
-    chunk_counter = 0
     stopped_gracefully = False
 
     async def safe_send_json(payload: dict) -> None:
@@ -187,7 +171,6 @@ async def meeting_websocket(websocket: WebSocket) -> None:
         
 
         async def on_transcript(result: TranscriptResult) -> None:
-            nonlocal chunk_counter
             if not result.is_final:
                 await safe_send_json({"type": "interim", "text": result.text})
                 return
@@ -205,21 +188,17 @@ async def meeting_websocket(websocket: WebSocket) -> None:
             )
 
             timestamp = datetime.now().strftime("%H:%M:%S")
-            ts_numeric = time.time()
-            with open(transcript_path, "a", encoding="utf-8") as f:
-                f.write(f"[{timestamp}] {transcript_line}\n")
-
             try:
-                await save_meeting_chunk(user_id, meeting_id, transcript_line)
-                chunk_counter += 1
+                chunk_id, chunk_ts = await save_meeting_chunk(user_id, meeting_id, transcript_line)
+                timestamp = datetime.fromtimestamp(chunk_ts.timestamp()).strftime("%H:%M:%S")
                 asyncio.create_task(
                     add_meeting_chunk_embedding(
                         user_id=user_id,
                         meeting_id=meeting_id,
                         text=transcript_line,
                         speaker=str(result.speaker) if result.speaker is not None else None,
-                        chunk_index=chunk_counter,
-                        created_at=ts_numeric,
+                        chunk_index=chunk_id,
+                        created_at=chunk_ts.timestamp(),
                     )
                 )
             except Exception as exc:
@@ -240,7 +219,10 @@ async def meeting_websocket(websocket: WebSocket) -> None:
             logger.error("Deepgram meeting error: %s", error)
             stt_needs_reconnect = True
             await safe_send_json(
-                {"type": "error", "message": f"Transcription error: {error}"}
+                {
+                    "type": "status",
+                    "message": "Transcription stream hiccup detected; reconnecting...",
+                }
             )
 
         
@@ -296,6 +278,17 @@ async def meeting_websocket(websocket: WebSocket) -> None:
 
         keepalive_task = asyncio.create_task(deepgram_keepalive())
 
+        async def websocket_ping() -> None:
+            # Heartbeat to keep proxies/browsers from timing out idle WS.
+            while meeting_active:
+                await asyncio.sleep(10)
+                try:
+                    await websocket.send_json({"type": "ping"})
+                except Exception:
+                    break
+
+        ping_task = asyncio.create_task(websocket_ping())
+
         async def reconnect_stt_if_needed() -> None:
             nonlocal deepgram_handler, stt_needs_reconnect, reconnect_attempting
             if reconnect_attempting or not stt_needs_reconnect or not meeting_active:
@@ -328,11 +321,11 @@ async def meeting_websocket(websocket: WebSocket) -> None:
 
         summary_task = asyncio.create_task(
             summarize_periodically(
-                transcript_path,
                 websocket,
-                initial_delay=compute_initial_periodic_delay_seconds(transcript_path),
                 user_id=user_id,
                 meeting_id=meeting_id,
+                interval=compute_initial_periodic_delay_seconds(),
+                lookback_minutes=settings.periodic_summary_lookback_minutes,
             )
         )
 
@@ -373,10 +366,8 @@ async def meeting_websocket(websocket: WebSocket) -> None:
                     {"type": "status", "message": "Generating final summary..."}
                 )
 
-                full_transcript = ""
                 try:
-                    with open(transcript_path, "r", encoding="utf-8") as f:
-                        full_transcript = f.read()
+                    full_transcript = await get_meeting_transcript(user_id, meeting_id)
 
                     if len(full_transcript.strip()) > 100:
                         summary_prompt = (
@@ -393,7 +384,7 @@ async def meeting_websocket(websocket: WebSocket) -> None:
                             "## Deadlines\n"
                             "## Risks / Blockers\n"
                             "## Participants\n\n"
-                            f"Transcript:\n{full_transcript}\n\n"
+                            f"Transcript:\n{redact_pii(full_transcript)}\n\n"
                             "Be explicit and concrete."
                         )
                         final_summary = await query_llm(
@@ -401,9 +392,6 @@ async def meeting_websocket(websocket: WebSocket) -> None:
                             max_retries=2,
                             temperature=0.2,
                         )
-
-                        with open(summary_path, "w", encoding="utf-8") as f:
-                            f.write(final_summary)
 
                         await save_meeting_summary(user_id, meeting_id, final_summary)
                         asyncio.create_task(
@@ -425,9 +413,7 @@ async def meeting_websocket(websocket: WebSocket) -> None:
                         )
                 except Exception as exc:
                     logger.error("Summary generation error: %s", exc, exc_info=True)
-                    fallback_summary = _fallback_summary_from_transcript(full_transcript)
-                    with open(summary_path, "w", encoding="utf-8") as f:
-                        f.write(fallback_summary)
+                    fallback_summary = _fallback_summary_from_transcript(full_transcript if 'full_transcript' in locals() else "")
                     await save_meeting_summary(user_id, meeting_id, fallback_summary)
                     asyncio.create_task(
                         add_meeting_summary_embedding(
@@ -468,8 +454,10 @@ async def meeting_websocket(websocket: WebSocket) -> None:
             elif text_data and text_data.startswith("ACTION: EMAIL"):
                 email = text_data.replace("ACTION: EMAIL", "").strip()
                 try:
-                    with open(summary_path, "r", encoding="utf-8") as f:
-                        summary = f.read()
+                    summary = await get_meeting_summary(user_id, meeting_id)
+                    if not summary:
+                        await safe_send_json({"type": "error", "message": "No summary available to email"})
+                        continue
                     loop = asyncio.get_running_loop()
                     await loop.run_in_executor(
                         None,
@@ -489,8 +477,10 @@ async def meeting_websocket(websocket: WebSocket) -> None:
 
             elif text_data == "ACTION: NOTION":
                 try:
-                    with open(summary_path, "r", encoding="utf-8") as f:
-                        summary = f.read()
+                    summary = await get_meeting_summary(user_id, meeting_id)
+                    if not summary:
+                        await safe_send_json({"type": "error", "message": "No summary available to export"})
+                        continue
                     loop = asyncio.get_running_loop()
                     await loop.run_in_executor(
                         None,
@@ -559,6 +549,12 @@ async def meeting_websocket(websocket: WebSocket) -> None:
                 await keepalive_task
             except asyncio.CancelledError:
                 pass
+        if ping_task:
+            ping_task.cancel()
+            try:
+                await ping_task
+            except asyncio.CancelledError:
+                pass
         if summary_task:
             summary_task.cancel()
             try:
@@ -610,6 +606,21 @@ async def meeting_summary_endpoint(
     validate_meeting_id(meeting_id)
     summary = await get_meeting_summary(current_user, meeting_id)
     return MeetingSummaryResponse(meeting_id=meeting_id, summary=summary)
+
+
+@router.delete("/{meeting_id}")
+async def delete_meeting(
+    meeting_id: str,
+    current_user: str = Depends(get_current_user),
+) -> dict:
+    """User-driven hard delete of meeting transcript, summaries, and embeddings."""
+    validate_meeting_id(meeting_id)
+    await delete_meeting_data(current_user, meeting_id)
+    try:
+        delete_meeting_embeddings(current_user, meeting_id)
+    except Exception as exc:
+        logger.debug("Embedding cleanup failed for %s/%s: %s", current_user, meeting_id, exc)
+    return {"status": "deleted", "meeting_id": meeting_id}
 
 
 @router.post("/{meeting_id}/chat", response_model=MeetingChatResponse)
@@ -669,11 +680,12 @@ async def meeting_chat(
                 detail="No past meetings available for this query.",
             )
 
-        global_context = "\n\n".join(context_chunks)
+        global_context = redact_pii("\n\n".join(context_chunks))
+        sanitized_query = redact_pii(query)
         prompt = (
             "You are an AI meeting assistant. Answer the user's question using the past meeting context below.\n\n"
             f"Context snippets:\n{global_context}\n\n"
-            f"User question: {query}\n\n"
+            f"User question: {sanitized_query}\n\n"
             "Provide a clear, helpful answer grounded in the provided context."
         )
 
@@ -791,11 +803,13 @@ async def meeting_chat(
         logger.debug("Cross-meeting RAG retrieval failed: %s", exc)
 
     context_joined = "\n\n".join(context_blocks)
+    safe_context = redact_pii(context_joined)
+    sanitized_query = redact_pii(query)
 
     prompt = (
         "You are an AI meeting assistant. Answer the user's question using the meeting context below.\n\n"
-        f"{context_joined}\n\n"
-        f"User question: {query}\n\n"
+        f"{safe_context}\n\n"
+        f"User question: {sanitized_query}\n\n"
         "Provide a clear, helpful answer grounded in the provided context."
     )
 

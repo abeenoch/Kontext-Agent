@@ -1,10 +1,12 @@
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch==2.2.2+cpu
 fastapi>=0.110
 uvicorn[standard]
 websockets
 pydantic-settings
 faster-whisper
 sounddevice
-numpy
+numpy<2.0
 groq
 sentence-transformers
 tokenizers>=0.14,<0.19
@@ -24,3 +26,6 @@ sqlalchemy>=2.0
 aiosqlite
 pyjwt
 httpx
+pydantic[email]
+deepgram-sdk
+cryptography

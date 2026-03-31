@@ -14,7 +14,11 @@ class Settings(BaseSettings):
     database_url: str = os.getenv("DATABASE_URL", "")
     chroma_dir: str = os.getenv("CHROMA_DIR", "./chroma_db")
 
-    transcripts_dir: str = os.getenv("TRANSCRIPTS_DIR", "data/meeting_transcripts")
+    encryption_key: str = os.getenv("ENCRYPTION_KEY", "")  # used for AES-GCM of transcripts/summaries
+    meeting_retention_days: int = int(os.getenv("MEETING_RETENTION_DAYS", "90"))
+    periodic_summary_lookback_minutes: int = int(
+        os.getenv("PERIODIC_SUMMARY_LOOKBACK_MINUTES", "10")
+    )
 
     groq_api_key: str = os.getenv("GROQ_API_KEY", "")
     groq_url: str = "https://api.groq.com/openai/v1/chat/completions"
@@ -44,7 +48,7 @@ class Settings(BaseSettings):
     chunk_size: int = int(os.getenv("CHUNK_SIZE", "800"))
     chunk_overlap: int = int(os.getenv("CHUNK_OVERLAP", "100"))
 
-    websocket_timeout: float = float(os.getenv("WEBSOCKET_TIMEOUT", "300.0"))
+    websocket_timeout: float = float(os.getenv("WEBSOCKET_TIMEOUT", "900.0"))
 
     smtp_host: str = os.getenv("SMTP_HOST", "smtp.gmail.com")
     smtp_port: int = int(os.getenv("SMTP_PORT", "587"))
@@ -100,6 +104,17 @@ class Settings(BaseSettings):
         if origins == ["*"]:
             return ["*"]
         return origins
+
+    def get_encryption_key(self) -> str:
+        """
+        Return stable key material for AES-GCM.
+
+        Prefers ENCRYPTION_KEY; falls back to JWT_SECRET to avoid breaking
+        existing dev/test data while encouraging explicit configuration.
+        """
+        if self.encryption_key:
+            return self.encryption_key
+        return self.jwt_secret
 
     def validate_security(self) -> None:
         """

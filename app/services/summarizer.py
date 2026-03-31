@@ -1,49 +1,43 @@
 import asyncio
-import os
-from datetime import datetime
 
 from fastapi import WebSocket
 
 from app.services.llm_agent import query_llm
-from app.services.chat_memory import save_periodic_summary
+from app.services.chat_memory import save_periodic_summary, get_recent_transcript_window
+from app.utils.redaction import redact_pii
+from app.config import get_settings
 from app.logger import get_logger
 
 logger = get_logger(__name__)
+settings = get_settings()
 
 SUMMARY_INTERVAL_SECONDS = 300  # generate periodic summary every 5 minutes
 
 
 async def summarize_periodically(
-    transcript_path: str,
     websocket: WebSocket,
+    *,
+    user_id: str,
+    meeting_id: str,
     interval: int = SUMMARY_INTERVAL_SECONDS,
-    initial_delay: int | None = None,
-    user_id: str | None = None,
-    meeting_id: str | None = None,
+    lookback_minutes: int | None = None,
 ) -> None:
     """
-    Background task that reads the growing transcript file and
+    Background task that reads recent transcript text from the DB and
     sends periodic summaries over the WebSocket.
-
-    Args:
-        transcript_path: Path to the transcript text file.
-        websocket: WebSocket connection to send summaries to.
-        interval: Seconds between summary generations.
     """
-    if initial_delay is None:
-        initial_delay = interval
+    if lookback_minutes is None:
+        lookback_minutes = settings.periodic_summary_lookback_minutes
 
-    await asyncio.sleep(max(1, initial_delay))
+    await asyncio.sleep(max(1, interval))
 
     while True:
-
-        if not os.path.exists(transcript_path):
-            await asyncio.sleep(15)
-            continue
-
         try:
-            with open(transcript_path, "r", encoding="utf-8") as f:
-                transcript = f.read()
+            transcript = await get_recent_transcript_window(
+                user_id=user_id,
+                meeting_id=meeting_id,
+                minutes=lookback_minutes,
+            )
 
             if len(transcript.strip()) < 100:
                 await asyncio.sleep(15)
@@ -60,18 +54,17 @@ async def summarize_periodically(
                 "- tentative owners and next steps if mentioned\n\n"
                 "Keep it under 180 words and avoid final conclusions.\n"
                 "Only include facts present in the transcript. Do not invent names, dates, or numbers.\n\n"
-                f"Transcript:\n{transcript}\n\n"
+                f"Transcript:\n{redact_pii(transcript)}\n\n"
                 "Periodic update:"
             )
 
-            summary = await query_llm(prompt, max_retries=1, temperature=0.2)
+            summary = await query_llm(prompt, max_retries=3, temperature=0.2)
 
             if summary:
-                if user_id and meeting_id:
-                    try:
-                        await save_periodic_summary(user_id, meeting_id, summary)
-                    except Exception as db_exc:
-                        logger.warning("Failed to persist periodic summary: %s", db_exc)
+                try:
+                    await save_periodic_summary(user_id, meeting_id, summary)
+                except Exception as db_exc:
+                    logger.warning("Failed to persist periodic summary: %s", db_exc)
                 try:
                     await websocket.send_json(
                         {"type": "periodic_summary", "summary": summary}
@@ -99,22 +92,6 @@ async def summarize_periodically(
         await asyncio.sleep(15)
 
 
-def compute_initial_periodic_delay_seconds(
-    transcript_path: str,
-    interval: int = SUMMARY_INTERVAL_SECONDS,
-) -> int:
-    """Align first periodic summary to original meeting start time when possible."""
-    try:
-        if not os.path.exists(transcript_path):
-            return interval
-        with open(transcript_path, "r", encoding="utf-8") as f:
-            first_line = f.readline().strip()
-        prefix = "Meeting Transcript - "
-        if not first_line.startswith(prefix):
-            return interval
-        started = datetime.strptime(first_line[len(prefix):], "%Y-%m-%d %H:%M:%S")
-        elapsed = (datetime.now() - started).total_seconds()
-        remaining = interval - int(elapsed % interval)
-        return max(1, remaining)
-    except Exception:
-        return interval
+def compute_initial_periodic_delay_seconds(interval: int = SUMMARY_INTERVAL_SECONDS) -> int:
+    """Align first periodic summary start; currently returns interval for simplicity."""
+    return interval

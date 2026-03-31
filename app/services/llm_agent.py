@@ -1,3 +1,6 @@
+import asyncio
+import ssl
+
 import httpx
 
 from app.config import get_settings
@@ -14,7 +17,14 @@ def _get_http_client() -> httpx.AsyncClient:
     """Return a module-level async HTTP client (lazy singleton)."""
     global _http_client
     if _http_client is None:
-        _http_client = httpx.AsyncClient(timeout=settings.llm_timeout)
+        _http_client = httpx.AsyncClient(
+            timeout=settings.llm_timeout,
+            limits=httpx.Limits(
+                max_keepalive_connections=5,
+                keepalive_expiry=20,
+            ),
+            http2=False,  # keep HTTP/1.1 to avoid edge TLS/proxy issues
+        )
     return _http_client
 
 
@@ -96,6 +106,23 @@ async def query_llm(
                     exc.response.text,
                 )
                 raise
+
+        except (httpx.TransportError, ssl.SSLError) as exc:
+            # Transient TLS/connection corruption (e.g., BAD_RECORD_MAC). Reset client and retry.
+            logger.warning(
+                "LLM transport/TLS error (attempt %d/%d): %s. Resetting client.",
+                attempt,
+                max_retries,
+                exc,
+            )
+            last_exc = exc
+            try:
+                await client.aclose()
+            except Exception:
+                pass
+            _http_client = None
+            await asyncio.sleep(1)
+            continue
 
         except Exception as exc:
             logger.error("Unexpected error querying LLM: %s", exc)

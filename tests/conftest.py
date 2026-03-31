@@ -38,6 +38,19 @@ if "chromadb" not in sys.modules:
         def query(self, query_embeddings=None, n_results=3):
             return {"documents": [self._docs[:n_results]]}
 
+        def get(self, where=None):
+            return {"ids": [str(i) for i in range(len(self._docs))], "documents": [self._docs]}
+
+        def delete(self, ids=None):
+            # Remove by id index ordering for simplicity
+            if not ids:
+                return
+            keep = []
+            for idx, doc in enumerate(self._docs):
+                if str(idx) not in set(ids):
+                    keep.append(doc)
+            self._docs = keep
+
     class _DummyClient:
         def __init__(self, path=None):
             self._collections = {}
@@ -47,8 +60,18 @@ if "chromadb" not in sys.modules:
                 self._collections[name] = _DummyCollection()
             return self._collections[name]
 
+        def get_collection(self, name):
+            return self.get_or_create_collection(name)
+
         def delete_collection(self, name):
             self._collections.pop(name, None)
+
+        def list_collections(self):
+            class _Col:
+                def __init__(self, name):
+                    self.name = name
+
+            return [_Col(n) for n in self._collections.keys()]
 
     chromadb_stub.Collection = _DummyCollection
     chromadb_stub.PersistentClient = _DummyClient

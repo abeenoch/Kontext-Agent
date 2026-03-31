@@ -3,7 +3,7 @@ FROM node:20-alpine
 WORKDIR /app
 
 COPY package*.json ./
-RUN npm ci
+RUN --mount=type=cache,id=npm,target=/root/.npm npm ci
 
 COPY . .
 

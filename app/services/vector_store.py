@@ -144,6 +144,8 @@ async def add_meeting_chunk_embedding(
     created_at: Optional[float] = None,
 ) -> None:
     """Embed and store an individual meeting transcript chunk."""
+    if settings.app_env == "test":
+        return
     if not text or not text.strip():
         return
 
@@ -178,6 +180,8 @@ async def add_meeting_summary_embedding(
     user_id: str, meeting_id: str, summary_text: str
 ) -> None:
     """Embed and store the final meeting summary."""
+    if settings.app_env == "test":
+        return
     if not summary_text or not summary_text.strip():
         return
 
@@ -245,3 +249,33 @@ async def query_meetings(
     except Exception as exc:
         logger.warning("Meeting query failed: %s", exc)
         return []
+
+
+def delete_meeting_embeddings(user_id: str, meeting_id: str) -> None:
+    """Remove all embeddings for a specific meeting."""
+    collection = get_meetings_collection(user_id)
+    try:
+        ids = collection.get(where={"meeting_id": meeting_id}).get("ids", [])
+        if ids:
+            collection.delete(ids=ids)
+    except Exception as exc:
+        logger.warning("Failed to delete meeting embeddings for %s/%s: %s", user_id, meeting_id, exc)
+
+
+def prune_old_meeting_embeddings(retention_days: int) -> None:
+    """Delete meeting embeddings older than retention window across all users."""
+    cutoff_ts = time.time() - retention_days * 86400
+    try:
+        for col in _client.list_collections():
+            if not col.name.startswith("meetings_"):
+                continue
+            try:
+                col_ref = _client.get_collection(col.name)
+                data = col_ref.get(where={"timestamp": {"$lt": cutoff_ts}})
+                ids = data.get("ids", [])
+                if ids:
+                    col_ref.delete(ids=ids)
+            except Exception as exc:
+                logger.debug("Prune failed for collection %s: %s", col.name, exc)
+    except Exception as exc:
+        logger.debug("Meeting embedding retention sweep failed: %s", exc)

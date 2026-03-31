@@ -11,12 +11,15 @@ from sqlalchemy.orm import declarative_base, sessionmaker
 from sqlalchemy.sql import func, text
 
 from app.config import get_settings
+from app.services.vector_store import prune_old_meeting_embeddings
+from app.utils.crypto_utils import encrypt_text, decrypt_text
 
 _settings = get_settings()
 DATABASE_URL = _settings.get_database_url()
 engine = create_async_engine(DATABASE_URL, echo=False)
 SessionLocal = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 Base = declarative_base()
+ENCRYPTION_KEY = _settings.get_encryption_key()
 
 class User(Base):
     """Registered user account."""
@@ -177,6 +180,10 @@ async def init_db() -> None:
 
     await prune_expired_reset_tokens()
     await prune_old_doc_jobs()
+    try:
+        await prune_old_meetings(_settings.meeting_retention_days)
+    except Exception:
+        pass
 
 
 
@@ -467,21 +474,31 @@ async def clear_history(user_id: str) -> None:
 
 
 
-async def save_meeting_chunk(user_id: str, meeting_id: str, text_content: str) -> None:
-    """Append a transcript chunk to a meeting."""
+async def save_meeting_chunk(user_id: str, meeting_id: str, text_content: str) -> tuple[int, datetime]:
+    """
+    Append a transcript chunk to a meeting.
+
+    Returns:
+        (chunk_id, timestamp) for sequencing and embeddings.
+    """
+    now_ts = datetime.now(timezone.utc)
+    encrypted = encrypt_text(text_content, ENCRYPTION_KEY)
     async with SessionLocal() as session:
-        session.add(
-            MeetingTranscript(
-                user_id=user_id,
-                meeting_id=meeting_id,
-                text=text_content,
-            )
+        record = MeetingTranscript(
+            user_id=user_id,
+            meeting_id=meeting_id,
+            text=encrypted,
+            timestamp=now_ts,
         )
+        session.add(record)
         await session.commit()
+        await session.refresh(record)
+        return record.id, now_ts
 
 
 async def save_meeting_summary(user_id: str, meeting_id: str, summary: str) -> None:
     """Create or update the summary for a meeting."""
+    encrypted = encrypt_text(summary, ENCRYPTION_KEY)
     async with SessionLocal() as session:
         existing = await session.execute(
             text(
@@ -497,14 +514,14 @@ async def save_meeting_summary(user_id: str, meeting_id: str, summary: str) -> N
                     "UPDATE meeting_summaries SET summary = :summary "
                     "WHERE user_id = :uid AND meeting_id = :mid"
                 ),
-                {"summary": summary, "uid": user_id, "mid": meeting_id},
+                {"summary": encrypted, "uid": user_id, "mid": meeting_id},
             )
         else:
             session.add(
                 MeetingSummary(
                     user_id=user_id,
                     meeting_id=meeting_id,
-                    summary=summary,
+                    summary=encrypted,
                 )
             )
         await session.commit()
@@ -512,12 +529,13 @@ async def save_meeting_summary(user_id: str, meeting_id: str, summary: str) -> N
 
 async def save_periodic_summary(user_id: str, meeting_id: str, summary: str) -> None:
     """Persist a periodic (in-meeting) summary snapshot."""
+    encrypted = encrypt_text(summary, ENCRYPTION_KEY)
     async with SessionLocal() as session:
         session.add(
             MeetingPeriodicSummary(
                 user_id=user_id,
                 meeting_id=meeting_id,
-                summary=summary,
+                summary=encrypted,
             )
         )
         await session.commit()
@@ -534,7 +552,7 @@ async def get_meeting_summary(user_id: str, meeting_id: str) -> str | None:
             {"uid": user_id, "mid": meeting_id},
         )
         row = result.fetchone()
-        return row[0] if row else None
+        return decrypt_text(row[0], ENCRYPTION_KEY) if row else None
 
 
 async def get_meeting_transcript(user_id: str, meeting_id: str) -> str:
@@ -548,7 +566,33 @@ async def get_meeting_transcript(user_id: str, meeting_id: str) -> str:
             {"uid": user_id, "mid": meeting_id},
         )
         rows = result.fetchall()
-        return " ".join(r[0] for r in rows)
+        parts: list[str] = []
+        for row in rows:
+            parts.append(decrypt_text(row[0], ENCRYPTION_KEY))
+        return "\n".join(p for p in parts if p)
+
+
+async def get_recent_transcript_window(
+    user_id: str,
+    meeting_id: str,
+    minutes: int,
+    max_chunks: int = 200,
+) -> str:
+    """Return transcript text within the last `minutes`, ordered chronologically."""
+    cutoff = datetime.now(timezone.utc) - timedelta(minutes=minutes)
+    async with SessionLocal() as session:
+        result = await session.execute(
+            text(
+                "SELECT text FROM meeting_transcripts "
+                "WHERE user_id = :uid AND meeting_id = :mid AND timestamp >= :cutoff "
+                "ORDER BY id ASC LIMIT :limit"
+            ),
+            {"uid": user_id, "mid": meeting_id, "cutoff": cutoff, "limit": max_chunks},
+        )
+        rows = result.fetchall()
+        return "\n".join(
+            decrypt_text(row[0], ENCRYPTION_KEY) for row in rows if row and row[0]
+        )
 
 
 async def list_meetings(user_id: str, limit: int = 50) -> list[dict]:
@@ -577,3 +621,53 @@ async def list_meetings(user_id: str, limit: int = 50) -> list[dict]:
                 }
             )
         return meetings
+
+
+async def delete_meeting_data(user_id: str, meeting_id: str) -> None:
+    """Hard delete all meeting-related records for the user/meeting."""
+    async with SessionLocal() as session:
+        await session.execute(
+            text("DELETE FROM meeting_transcripts WHERE user_id = :uid AND meeting_id = :mid"),
+            {"uid": user_id, "mid": meeting_id},
+        )
+        await session.execute(
+            text("DELETE FROM meeting_periodic_summaries WHERE user_id = :uid AND meeting_id = :mid"),
+            {"uid": user_id, "mid": meeting_id},
+        )
+        await session.execute(
+            text("DELETE FROM meeting_summaries WHERE user_id = :uid AND meeting_id = :mid"),
+            {"uid": user_id, "mid": meeting_id},
+        )
+        await session.execute(
+            text("DELETE FROM meeting_sessions WHERE user_id = :uid AND meeting_id = :mid"),
+            {"uid": user_id, "mid": meeting_id},
+        )
+        await session.commit()
+
+
+async def prune_old_meetings(retention_days: int) -> None:
+    """Delete meeting data older than the retention window."""
+    cutoff = datetime.now(timezone.utc) - timedelta(days=retention_days)
+    async with SessionLocal() as session:
+        await session.execute(
+            text("DELETE FROM meeting_transcripts WHERE timestamp < :cutoff"),
+            {"cutoff": cutoff},
+        )
+        await session.execute(
+            text("DELETE FROM meeting_periodic_summaries WHERE created_at < :cutoff"),
+            {"cutoff": cutoff},
+        )
+        await session.execute(
+            text("DELETE FROM meeting_summaries WHERE created_at < :cutoff"),
+            {"cutoff": cutoff},
+        )
+        await session.execute(
+            text("DELETE FROM meeting_sessions WHERE last_seen < :cutoff"),
+            {"cutoff": cutoff},
+        )
+        await session.commit()
+    # Also prune vector embeddings
+    try:
+        prune_old_meeting_embeddings(retention_days)
+    except Exception:
+        pass

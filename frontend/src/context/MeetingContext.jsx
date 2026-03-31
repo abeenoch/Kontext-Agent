@@ -53,9 +53,13 @@ export function MeetingProvider({ children }) {
         setInterimTranscript(data.text || '');
         break;
       case 'periodic_summary':
+        setSummary(data.summary);
+        setStatus({ type: 'success', message: 'Periodic summary ready' });
+        setAwaitingFinal(false);
+        break;
       case 'final_summary':
         setSummary(data.summary);
-        setStatus({ type: 'success', message: 'Summary ready' });
+        setStatus({ type: 'success', message: 'Final summary ready' });
         setAwaitingFinal(false);
         // Graceful close after final summary to avoid missing message
         setTimeout(() => disconnect(), 300);
@@ -71,7 +75,18 @@ export function MeetingProvider({ children }) {
 
   const { isConnected, sendMessage, connect, disconnect, disableReconnect } = useWebSocket(
     `${WS_URL}/meeting/ws${wsToken ? `?token=${encodeURIComponent(wsToken)}` : ''}`,
-    handleWebSocketMessage
+    handleWebSocketMessage,
+    {
+      onOpen: () => {
+        // Ensure server knows sample rate after any (re)connect.
+        sendMessage(
+          JSON.stringify({
+            type: 'config',
+            sample_rate: sampleRate || 16000,
+          })
+        );
+      },
+    }
   );
 
   const startMeeting = useCallback(async () => {
@@ -91,14 +106,6 @@ export function MeetingProvider({ children }) {
     const query = new URLSearchParams({ meeting_id: newMeetingId });
     if (wsToken) query.set('token', wsToken);
     connect(`${WS_URL}/meeting/ws?${query.toString()}`);
-
-    // Send sample rate config after connect attempt
-    sendMessage(
-      JSON.stringify({
-        type: 'config',
-        sample_rate: sampleRate || 16000,
-      })
-    );
 
     const started = await startCapture(
       (pcmFrame) => {
