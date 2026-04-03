@@ -1,31 +1,27 @@
---extra-index-url https://download.pytorch.org/whl/cpu
-torch==2.2.2+cpu
 fastapi>=0.110
 uvicorn[standard]
 websockets
 pydantic-settings
-faster-whisper
-sounddevice
+pydantic[email]
 numpy<2.0
 groq
 sentence-transformers
 tokenizers>=0.14,<0.19
-pinecone-client
 notion-client
-streamlit
 requests
 chromadb
 pdfplumber
 asyncpg
+aiosqlite
 python-dotenv
 python-multipart
 colorlog
 passlib==1.7.4
 bcrypt==4.0.1
 sqlalchemy>=2.0
-aiosqlite
 pyjwt
 httpx
-pydantic[email]
-deepgram-sdk
+# Deepgram SDK 6.x currently breaks streaming handshake in our container build.
+# Pin to the last known-good version that works with this code.
+deepgram-sdk==5.3.2
 cryptography

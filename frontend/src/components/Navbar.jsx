@@ -2,6 +2,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { Mic, MessageSquare, LogOut } from 'lucide-react';
 import clsx from 'clsx';
+import logoSrc from '../assets/logo-k.svg';
 
 export default function Navbar() {
     const { user, logout } = useAuth();
@@ -32,7 +33,7 @@ export default function Navbar() {
 
                     {/* Logo */}
                     <Link to="/" className="flex items-center space-x-2 font-bold text-xl text-slate-900">
-                        <img src="/src/assets/logo-k.svg" alt="Kontext" className="w-8 h-8 rounded-lg shadow-sm" />
+                        <img src={logoSrc} alt="Kontext" className="w-8 h-8 rounded-lg shadow-sm" />
                         <span>Kontext</span>
                     </Link>
 

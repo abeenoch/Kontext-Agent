@@ -16,7 +16,7 @@ _http_client: httpx.AsyncClient | None = None
 def _get_http_client() -> httpx.AsyncClient:
     """Return a module-level async HTTP client (lazy singleton)."""
     global _http_client
-    if _http_client is None:
+    if _http_client is None or getattr(_http_client, "is_closed", False):
         _http_client = httpx.AsyncClient(
             timeout=settings.llm_timeout,
             limits=httpx.Limits(
@@ -123,6 +123,21 @@ async def query_llm(
             _http_client = None
             await asyncio.sleep(1)
             continue
+
+        except RuntimeError as exc:
+            # httpx raises RuntimeError("Cannot send a request, as the client has been closed.")
+            if "client has been closed" in str(exc):
+                logger.warning(
+                    "LLM client was closed (attempt %d/%d). Recreating and retrying.",
+                    attempt,
+                    max_retries,
+                )
+                _http_client = None
+                client = _get_http_client()
+                last_exc = exc
+                await asyncio.sleep(0.5)
+                continue
+            raise
 
         except Exception as exc:
             logger.error("Unexpected error querying LLM: %s", exc)

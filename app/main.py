@@ -40,11 +40,13 @@ async def lifespan(application: FastAPI):
     logger.info("Starting Kontext Agent")
     await init_db()
     logger.info("Database initialized")
-    if settings.app_env != "test":
+    if settings.app_env != "test" and settings.preload_embeddings:
         try:
             preload_embedding_model()
         except Exception as exc:
             logger.warning("Embedding model preload failed (will lazy-load later): %s", exc)
+    else:
+        logger.info("Skipping embedding preload (env setting or test mode)")
     yield
     logger.info("Shutting down Kontext Agent")
 

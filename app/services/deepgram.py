@@ -123,7 +123,6 @@ class DeepgramSTTHandler:
                 "endpointing": 10,
             }
 
-            # In SDK v5.3.2, path is listen.v1.connect
             async with self._client.listen.v1.connect(**kwargs) as socket:
                 self._socket = socket
                 self._last_activity_at = time.monotonic()
@@ -151,7 +150,7 @@ class DeepgramSTTHandler:
             return False
 
         try:
-            # SDK v5.3.2 AsyncV1SocketClient uses send_media for audio
+            #
             async with self._send_lock:
                 await self._socket.send_media(audio_data)
                 self._last_activity_at = time.monotonic()
@@ -317,7 +316,7 @@ class DeepgramTTSService:
             loop = asyncio.get_running_loop()
 
             def _call_speak():
-                # In SDK v5, path is speak.v1.audio.generate
+                # 
                 audio_iterator = client.speak.v1.audio.generate(
                     text=text,
                     model=self.model,
@@ -368,7 +367,7 @@ class DeepgramFileTranscriber:
                 # Browser voice uploads are raw PCM16; wrap in WAV first.
                 wav_data = pcm16_to_wav_bytes(audio_data, sample_rate=sample_rate)
 
-                # In SDK v5, path is listen.v1.media.transcribe_file
+                # 
                 response = client.listen.v1.media.transcribe_file(
                     request=wav_data,
                     **options

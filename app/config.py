@@ -19,6 +19,7 @@ class Settings(BaseSettings):
     periodic_summary_lookback_minutes: int = int(
         os.getenv("PERIODIC_SUMMARY_LOOKBACK_MINUTES", "10")
     )
+    preload_embeddings: bool = os.getenv("PRELOAD_EMBEDDINGS", "false").lower() == "true"
 
     groq_api_key: str = os.getenv("GROQ_API_KEY", "")
     groq_url: str = "https://api.groq.com/openai/v1/chat/completions"

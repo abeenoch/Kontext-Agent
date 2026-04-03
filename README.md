@@ -25,6 +25,7 @@ Copy `.env.example` to `.env` and set at least:
 - `DEEPGRAM_API_KEY`
 - `JWT_SECRET` (>=32 chars in production)
 - `ENCRYPTION_KEY` (falls back to `JWT_SECRET`, but set a dedicated key for production)
+- `PRELOAD_EMBEDDINGS` (set to `true` to download the embedding model at startup; defaults to `false` to speed container health checks)
 
 Common optional keys:
 - `GROQ_MODEL`, `LLM_TEMPERATURE`, `LLM_TIMEOUT`

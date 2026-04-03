@@ -49,7 +49,7 @@ export default function SummaryPanel({ summary, onEmail, onNotion, status, isLoa
                         title="Push to Notion"
                         className="p-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed border border-slate-200"
                     >
-                        <img src="https://upload.wikimedia.org/wikipedia/commons/4/45/Notion_app_logo.png" alt="Notion" className="w-4 h-4 opacity-80" />
+                        <svg className="w-4 h-4 opacity-80" viewBox="0 0 100 100" fill="currentColor" xmlns="http://www.w3.org/2000/svg"><path d="M6 4.8C9.3 7.4 10.6 7.2 17 6.8l57.4-3.4c1.3 0 .2-1.3-.4-1.5L63.4.2C61.2-.2 58.3 0 55.7.2L1.8 4.2C.5 4.4 .2 5.1 .6 5.9L6 4.8zm2.4 9.2v57.8c0 3.1 1.5 4.3 5 4.1l63-3.6c3.5-.2 3.9-2.4 3.9-5V9.6c0-2.6-1-4-3.3-3.8L11.7 9.4c-2.5.2-3.3 1.5-3.3 4.6zm62.1 2.4c.4 1.7 0 3.4-1.7 3.6l-2.8.5v41.3c-2.4 1.3-4.7 2-6.6 2-3.1 0-3.9-.9-6.2-3.7L36.4 36.4v28.3l5.9 1.3s0 3.4-4.7 3.4l-13-.7c-.4-.9 0-3.1 1.3-3.5l3.4-.9V24.3L24.5 24c-.4-1.7.6-4.1 3.3-4.3l14-.9 19.2 29.4V21.2l-5-.5c-.4-2.1 1.2-3.6 3.1-3.8l13.4-.3z"/></svg>
                     </button>
                     <button
                         onClick={onEmail}

@@ -7,7 +7,7 @@ _logger = get_logger(__name__)
 
 
 def _ensure_model_loaded():
-    """Load the embedding model once (no-op if already loaded)."""
+    """Load the embedding model once"""
     global _model, _model_name
     if _model is not None:
         return
