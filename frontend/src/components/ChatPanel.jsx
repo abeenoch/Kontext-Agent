@@ -1,6 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
 import { Send, User, Bot, Loader2, Volume2, VolumeX } from 'lucide-react';
-import ReactMarkdown from 'react-markdown';
 import VoiceInput from './VoiceInput';
 
 export default function ChatPanel({
@@ -88,7 +87,7 @@ export default function ChatPanel({
                                     ? 'bg-amber-500 text-white rounded-tr-none'
                                     : 'bg-slate-100 text-slate-800 rounded-tl-none border border-slate-200'}
               `}>
-                                <ReactMarkdown>{msg.content}</ReactMarkdown>
+                                <p className="whitespace-pre-line break-words">{msg.content}</p>
                                 {msg.sources && (
                                     <div className="mt-2 pt-2 border-t border-slate-300 text-xs text-slate-500 flex items-center gap-1">
                                         Sources used

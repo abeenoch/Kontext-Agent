@@ -1,4 +1,4 @@
-import { Upload, Plus, Check, FileText, X } from 'lucide-react';
+import { Upload, FileText, X, Trash2 } from 'lucide-react';
 import ChatPanel from '../components/ChatPanel';
 import { useChat } from '../context/ChatContext';
 import api from '../services/api';
@@ -13,15 +13,10 @@ export default function ChatPage() {
         uploadStatus,
         llmStatus,
         sendMessage,
-        clearMessages,
+        clearChat,
         uploadDoc,
         clearDocs,
         setUploadStatus,
-        tabs,
-        activeTabId,
-        addTab,
-        activateTab,
-        deleteTab,
     } = useChat();
     const [recentJobs, setRecentJobs] = useState([]);
     const [jobStatuses, setJobStatuses] = useState({});
@@ -37,19 +32,18 @@ export default function ChatPage() {
 
     // Poll job status for recent uploads
     useInterval(async () => {
-        if (!recentJobs.length || !activeTabId) return;
+        if (!recentJobs.length) return;
 
         const activeJobs = recentJobs.filter(
-            (j) => j.tabId === activeTabId && !['completed', 'failed'].includes(jobStatuses[j.jobId])
+            (j) => !['completed', 'failed'].includes(jobStatuses[j.jobId])
         );
         if (!activeJobs.length) return;
 
         const updated = {};
         for (const job of activeJobs.slice(0, 5)) {
             try {
-                const res = await api.get(`/docs/status/${job.jobId}`, {
-                    params: { tab_id: job.tabId },
-                });
+                const params = job.tabId ? { tab_id: job.tabId } : undefined;
+                const res = await api.get(`/docs/status/${job.jobId}`, { params });
                 updated[job.jobId] = res.data.status;
             } catch {
                 // ignore polling errors
@@ -88,64 +82,31 @@ export default function ChatPage() {
         if (!confirm('Clear all uploaded documents?')) return;
         try {
             await clearDocs();
+            setRecentJobs([]);
+            setJobStatuses({});
+            localStorage.removeItem('doc_jobs');
         } catch (_error) {
             setUploadStatus({ type: 'error', message: 'Failed to clear documents' });
         }
     };
 
-    const activeTab = tabs.find((t) => t.id === activeTabId) || tabs[0];
-    const handleNewTab = () => {
-        addTab();
+    const handleClearChat = async () => {
+        if (!confirm('Clear chat history? This removes messages but keeps uploads.')) return;
+        await clearChat();
     };
 
     return (
-        <div className="h-[calc(100vh-64px)] p-3 md:p-6 max-w-7xl mx-auto grid grid-cols-1 md:grid-cols-[260px_1fr] gap-4">
+        <div className="h-[calc(100vh-64px)] p-3 md:p-6 max-w-7xl mx-auto grid grid-cols-1 md:grid-cols-[280px_1fr] gap-4">
             {/* Sidebar */}
             <aside className="bg-white border border-slate-200 rounded-2xl shadow-sm flex flex-col">
-                <div className="p-4 border-b border-slate-200 flex items-center justify-between">
-                    <div className="text-sm font-semibold text-slate-900">Chats</div>
-                    <button
-                        onClick={handleNewTab}
-                        className="inline-flex items-center gap-1 px-2 py-1 rounded-lg border border-dashed border-slate-300 text-slate-700 hover:bg-slate-100 text-xs"
-                        title="New chat"
-                    >
-                        <Plus size={14} /> New
-                    </button>
+                <div className="p-4 border-b border-slate-200">
+                    <div className="text-sm font-semibold text-slate-900">Knowledge Base</div>
+                    <p className="text-xs text-slate-500 mt-1">
+                        Uploads here power the single shared chat space.
+                    </p>
                 </div>
 
-                <div className="flex-1 overflow-y-auto p-3 space-y-2">
-                        {tabs.map((tab) => (
-                            <div
-                                key={tab.id}
-                                className={`group flex items-center gap-2 px-3 py-2 rounded-xl text-sm border ${
-                                    tab.id === activeTab?.id
-                                        ? 'bg-slate-900 text-white border-slate-900'
-                                        : 'border-slate-200 text-slate-800 hover:bg-slate-50'
-                                }`}
-                            >
-                                <button
-                                    onClick={() => activateTab(tab.id)}
-                                    className="flex-1 flex items-center gap-2 text-left"
-                                >
-                                    <FileText size={14} />
-                                    <span className="truncate">{tab.name}</span>
-                                    {tab.id === activeTab?.id && <Check size={14} className="ml-auto" />}
-                                </button>
-                                <button
-                                    className="opacity-0 group-hover:opacity-100 transition-opacity text-slate-400 hover:text-rose-600"
-                                    title="Delete tab"
-                                    onClick={(e) => {
-                                        e.stopPropagation();
-                                        if (confirm('Delete this chat?')) deleteTab(tab.id);
-                                    }}
-                                >
-                                    <X size={14} />
-                                </button>
-                            </div>
-                        ))}
-                    </div>
-
-                <div className="p-4 border-t border-slate-200 space-y-3">
+                <div className="p-4 space-y-3 flex-1 overflow-y-auto">
                     <label className="flex items-center gap-2 px-3 py-2 rounded-xl bg-slate-900 text-white text-sm cursor-pointer hover:bg-slate-700 transition-colors">
                         <Upload size={16} />
                         {isUploading ? 'Uploading...' : 'Upload PDF/TXT'}
@@ -162,16 +123,18 @@ export default function ChatPage() {
                             {uploadStatus.message}
                         </p>
                     )}
-                    {recentJobs.filter((j) => j.tabId === activeTabId).length > 0 && (
+                    {recentJobs.length > 0 && (
                         <div className="text-xs text-slate-600 space-y-1">
                             <div className="font-semibold text-slate-800">Ingestion jobs</div>
                             <ul className="space-y-1">
                                 {recentJobs
-                                    .filter((j) => j.tabId === activeTabId)
-                                    .slice(0, 3)
+                                    .slice(0, 5)
                                     .map((j) => (
                                         <li key={j.jobId} className="flex items-center justify-between">
-                                            <span className="truncate max-w-[140px]">{j.filename}</span>
+                                            <span className="truncate max-w-[140px] flex items-center gap-1">
+                                                <FileText size={12} />
+                                                {j.filename}
+                                            </span>
                                             <span className="text-[11px] text-slate-500">
                                                 {jobStatuses[j.jobId] ? jobStatuses[j.jobId] : `${j.jobId.slice(0, 8)}...`}
                                             </span>
@@ -184,7 +147,7 @@ export default function ChatPage() {
                         onClick={handleClearDocs}
                         className="w-full text-sm px-3 py-2 rounded-lg border border-slate-300 hover:bg-slate-100 text-slate-700"
                     >
-                        Clear Docs (tab)
+                        Clear Knowledge Base
                     </button>
                     {llmStatus && (
                         <div
@@ -203,18 +166,28 @@ export default function ChatPage() {
             {/* Main chat area */}
             <div className="bg-white border border-slate-200 rounded-2xl shadow-sm p-3 md:p-4 flex flex-col">
                 <div className="flex items-center justify-between mb-3">
-                    <div>
-                        <div className="text-sm font-semibold text-slate-900">{activeTab?.name || 'Chat'}</div>
+                    <div className="flex flex-col gap-0.5">
+                        <div className="text-sm font-semibold text-slate-900">Chat</div>
                         <div className="text-xs text-slate-500">
-                            Uploads in this chat stay isolated; ask questions to use them.
+                            All messages share one knowledge base; upload once and chat freely.
                         </div>
                     </div>
-                    {uploadStatus && uploadStatus.type === 'error' && (
-                        <div className="flex items-center gap-2 text-xs text-rose-700 bg-rose-50 border border-rose-200 px-3 py-1.5 rounded-lg">
-                            <X size={14} />
-                            {uploadStatus.message}
-                        </div>
-                    )}
+                    <div className="flex items-center gap-2">
+                        <button
+                            onClick={handleClearChat}
+                            className="inline-flex items-center gap-1 text-xs px-3 py-1.5 rounded-lg border border-slate-300 hover:bg-slate-100 text-slate-700"
+                            title="Clear chat history"
+                        >
+                            <Trash2 size={14} />
+                            Clear chat
+                        </button>
+                        {uploadStatus && uploadStatus.type === 'error' && (
+                            <div className="flex items-center gap-2 text-xs text-rose-700 bg-rose-50 border border-rose-200 px-3 py-1.5 rounded-lg">
+                                <X size={14} />
+                                {uploadStatus.message}
+                            </div>
+                        )}
+                    </div>
                 </div>
                 <div className="flex-1 min-h-[520px]">
                     <ChatPanel

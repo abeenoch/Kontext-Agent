@@ -14,12 +14,12 @@ class Settings(BaseSettings):
     database_url: str = os.getenv("DATABASE_URL", "")
     chroma_dir: str = os.getenv("CHROMA_DIR", "./chroma_db")
 
+    #transcripts_dir: str = os.getenv("TRANSCRIPTS_DIR", "data/meeting_transcripts")
     encryption_key: str = os.getenv("ENCRYPTION_KEY", "")  # used for AES-GCM of transcripts/summaries
     meeting_retention_days: int = int(os.getenv("MEETING_RETENTION_DAYS", "90"))
     periodic_summary_lookback_minutes: int = int(
         os.getenv("PERIODIC_SUMMARY_LOOKBACK_MINUTES", "10")
     )
-    preload_embeddings: bool = os.getenv("PRELOAD_EMBEDDINGS", "false").lower() == "true"
 
     groq_api_key: str = os.getenv("GROQ_API_KEY", "")
     groq_url: str = "https://api.groq.com/openai/v1/chat/completions"
@@ -50,6 +50,7 @@ class Settings(BaseSettings):
     chunk_overlap: int = int(os.getenv("CHUNK_OVERLAP", "100"))
 
     websocket_timeout: float = float(os.getenv("WEBSOCKET_TIMEOUT", "900.0"))
+    preload_embeddings: bool = os.getenv("PRELOAD_EMBEDDINGS", "true").lower() == "true"
 
     smtp_host: str = os.getenv("SMTP_HOST", "smtp.gmail.com")
     smtp_port: int = int(os.getenv("SMTP_PORT", "587"))
