@@ -3,7 +3,8 @@ FROM python:3.11-slim AS builder
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    PIP_DISABLE_PIP_VERSION_CHECK=1
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PIP_NO_CACHE_DIR=1
 
 WORKDIR /app
 
@@ -13,7 +14,8 @@ RUN apt-get update \
 
 COPY requirements.txt ./
 RUN pip install --upgrade pip \
- && pip install --prefix=/install -r requirements.txt
+ && pip install --prefix=/install --no-cache-dir -r requirements.txt \
+ && rm -rf /root/.cache/pip
 
 #  runtime
 FROM python:3.11-slim AS runtime
@@ -32,7 +34,6 @@ COPY --from=builder /install /usr/local
 
 COPY app ./app
 
-# Pre-download the embedding model so startup doesn't depend on outbound network
 ARG EMBEDDING_MODEL=all-MiniLM-L6-v2
 RUN python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('${EMBEDDING_MODEL}')"
 
