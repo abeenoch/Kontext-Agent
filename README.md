@@ -1,22 +1,22 @@
 # Kontext Agent
 
-Full-stack meeting and knowledge assistant with real-time transcription, periodic summaries, RAG search, and voice/chat.
+Full-stack meeting and knowledge assistant with real-time transcription, periodic and final summaries, RAG search, and voice/chat.
 
-## What’s Inside
-- **Backend:** FastAPI (`app/`), Postgres for auth/chat/meeting data (transcripts & summaries encrypted at rest), ChromaDB (`chroma_db/`) for vectors.
-- **LLM:** Groq chat completions with configurable model/temperature; PII is scrubbed before prompts.
-- **Speech:** Deepgram STT (meetings + voice chat) and TTS.
+## What's Inside
+- **Backend:** FastAPI (`app/`), Postgres for auth/chat/meeting data (transcripts and summaries encrypted at rest), ChromaDB (`chroma_db/`) for vectors.
+- **LLM:** Groq chat completions with configurable model and temperature; PII is scrubbed before prompts.
+- **Speech:** Deepgram STT (meetings and voice chat) and TTS.
 - **Frontend:** React 19 + Vite + Tailwind (`frontend/`).
-- **Integrations:** SMTP email, Notion export, JWT auth with signup/login/reset, rate limiting, meeting delete + retention/TTL.
+- **Integrations:** SMTP email, Notion export, JWT auth with signup/login/reset, rate limiting, meeting delete, and retention/TTL.
 
 ## Core Features
-- **Live meeting WebSocket** (`/meeting/ws`): PCM16 audio (binary or base64), interim/final transcripts, keep-alive + auto reconnect, `STOP` triggers a structured final summary, runtime reconfig via `{"type":"config","sample_rate":16000}`.
+- **Live meeting WebSocket** (`/meeting/ws`): PCM16 audio (binary or base64), interim/final transcripts, keep-alive plus auto reconnect, `STOP` triggers a structured final summary, runtime reconfig via `{"type":"config","sample_rate":16000}`.
 - **Summaries:** Periodic delta-based snapshots (last N minutes) plus final Markdown summary; fallback summary if the LLM fails.
 - **Post-meeting chat** (`POST /meeting/{id|recent|any|latest}/chat`): RAG over the meeting and cross-meeting context; accepts voice input; commands to email or Notion-export the summary.
 - **Document chat** (`POST /docs/chat`): PDF/TXT upload (50 MB) with ingestion jobs, per-tab collections, optional RAG bypass, voice input.
 - **General chat** (`POST /chat/query`): Remembers recent history and uses doc context when available; optional voice input.
-- **Voice chat socket** (`/voice-chat/ws`): Real-time STT → LLM → TTS with conversation recall.
-- **Data hygiene:** PII redaction before LLM calls, encrypted DB columns for transcripts/summaries, meeting retention/TTL and hard delete.
+- **Voice chat socket** (`/voice-chat/ws`): Real-time STT -> LLM -> TTS with conversation recall.
+- **Data hygiene:** PII redaction before LLM calls, encrypted DB columns for transcripts/summaries, meeting retention/TTL, and hard delete.
 
 ## Environment
 Copy `.env.example` to `.env` and set at least:
@@ -55,26 +55,73 @@ npm run dev
 - Frontend dev: `http://localhost:5173`
 
 ## Docker
+### Quick start (prebuilt images)
+Prebuilt images are on Docker Hub:
+- Backend: `lazyghost1/kontext-backend`
+- Frontend: `lazyghost1/kontext-frontend`
+
+Place a `.env` (copy from `.env.example`) in the repo root so the backend has your keys/secrets.
+
+Save this as `docker-compose.yml` (or adapt your existing one):
+```yaml
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: kontext_agent
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  backend:
+    image: lazyghost1/kontext-backend:latest
+    env_file: .env
+    environment:
+      APP_ENV: production
+      APP_HOST: 0.0.0.0
+      APP_PORT: "8000"
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/kontext_agent
+      CHROMA_DIR: /app/chroma_db
+      PRELOAD_EMBEDDINGS: "true"
+      CORS_ORIGINS: http://localhost
+    ports:
+      - "8000:8000"
+    depends_on:
+      - postgres
+    volumes:
+      - chroma_data:/app/chroma_db
+
+  frontend:
+    image: lazyghost1/kontext-frontend:latest
+    environment:
+      VITE_API_BASE_URL: http://localhost:8000
+      VITE_WS_URL: ws://localhost:8000
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+
+volumes:
+  postgres_data:
+  chroma_data:
+```
+
+Run it:
+```bash
+docker compose up -d
+```
+
+### Build locally (optional)
+If you prefer to build from source:
 ```bash
 docker compose up --build
 ```
-Services:
-- `postgres` (16) with DB `kontext_agent`, user/password `postgres` (port 5432 exposed)
-- `backend` (FastAPI)
-- `frontend` (Vite dev server)
-
-Backend is pre-wired to Postgres via:
-```
-DATABASE_URL=postgresql+asyncpg://postgres:postgres@postgres:5432/kontext_agent
-```
-Persistent data:
-- Vector store: `./chroma_db` ↔ `/app/chroma_db`
-- Transcripts/summaries live in the DB (no host volume needed for them)
 
 ## API Quick Reference
 - `GET /` and `GET /health`
 - `POST /auth/signup | /login | /forgot-password | /reset-password`
-- `WS /meeting/ws` — send audio; `STOP` to finalize; `ACTION: EMAIL <addr>` or `ACTION: NOTION` to export
+- `WS /meeting/ws` - send audio; `STOP` to finalize; `ACTION: EMAIL <addr>` or `ACTION: NOTION` to export
 - `GET /meeting/history`, `/meeting/{id}/transcript`, `/meeting/{id}/summary`
 - `DELETE /meeting/{id}` (hard delete transcript, summaries, embeddings)
 - `POST /meeting/{id|recent|any|latest}/chat`
@@ -82,10 +129,9 @@ Persistent data:
 - `POST /docs/upload`, `GET /docs/status/{job_id}`, `POST /docs/chat`, `DELETE /docs/clear`
 - `WS /voice-chat/ws`
 
-## Data & Storage
-- Transcripts/summaries: encrypted in Postgres with retention (`MEETING_RETENTION_DAYS`) and user-driven delete.
+## Data and Storage
+- Transcripts and summaries: encrypted in Postgres with retention (`MEETING_RETENTION_DAYS`).
 - Vector store: `chroma_db/` (Chroma persistent client).
-- Tables auto-created on startup (`app/services/chat_memory.py`).
 
 ## Testing
 ```bash
@@ -93,7 +139,19 @@ pytest
 ```
 Tests stub Chroma/RAG for speed; they use SQLite by default unless `DATABASE_URL` is set.
 
+## Contributing
+Pull requests are welcome. Quick checklist:
+- Fork the repo and create a branch (`git checkout -b feat/your-idea`).
+- Backend: Python 3.11, `python -m venv .venv && .\.venv\Scripts\activate`, `pip install -r requirements.txt`, run `pytest`.
+- Frontend: Node 20, `cd frontend && npm install && npm run lint`.
+- Run apps locally (`uvicorn app.main:app --reload --port 8000` and `npm run dev`). If you change ports, set `VITE_API_BASE_URL` (and `VITE_WS_URL` for sockets) in `frontend/.env.local`.
+- Keep PRs focused; include screenshots for UI changes when helpful.
+- In the PR description, note the motivation, what changed, and how you tested.
+
+## Troubleshooting
+- **Port already in use:** stop the conflicting process (`netstat -ano | findstr :8000`) or change the port and update `VITE_API_BASE_URL`.
+- **Slow first start:** embedding model download can take time; set `PRELOAD_EMBEDDINGS=false` to skip upfront (it will lazy-load later).
+
 ## Security Notes
 - Set strong `JWT_SECRET` and explicit `CORS_ORIGINS` in production.
-- Keep `ENCRYPTION_KEY` private; rotate it with a planned re-encrypt/migrate strategy.
 - Do not commit real `.env` values.

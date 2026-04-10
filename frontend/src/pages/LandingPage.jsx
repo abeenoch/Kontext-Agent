@@ -1,7 +1,22 @@
-import { Link } from 'react-router-dom';
+import { Link, Navigate } from 'react-router-dom';
 import { Mic, FileText, MessageSquare } from 'lucide-react';
+import { useAuth } from '../context/AuthContext';
 
 export default function LandingPage() {
+    const { user, loading } = useAuth();
+
+    if (loading) {
+        return (
+            <div className="min-h-[calc(100vh-64px)] flex items-center justify-center text-slate-500">
+                <div className="animate-pulse">Loading...</div>
+            </div>
+        );
+    }
+
+    if (user) {
+        return <Navigate to="/meeting" replace />;
+    }
+
     return (
         <div className="min-h-[calc(100vh-64px)] flex flex-col items-center justify-center">
 

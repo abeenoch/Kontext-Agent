@@ -700,7 +700,6 @@ async def meeting_chat(
                 )
             raise
 
-    # -------- Standard meeting-specific flow -----------------------------
     transcript = await get_meeting_transcript(current_user, meeting_id)
     if not transcript:
         raise HTTPException(
@@ -795,7 +794,7 @@ async def meeting_chat(
             user_id=current_user,
             query=query,
             meeting_id=None,
-            n_results=3,
+            n_results=4,
         )
         if cross_meeting:
             context_blocks.append("Relevant snippets from other meetings:\n" + "\n\n".join(cross_meeting))
