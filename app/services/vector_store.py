@@ -69,6 +69,22 @@ def _maybe_get(name: str):
         return None
 
 
+def _chunk_text(text: str, max_chars: int = 800, overlap: int = 120) -> list[str]:
+    """Split text into overlapping chunks for embedding."""
+    chunks: list[str] = []
+    start = 0
+    n = len(text)
+    while start < n:
+        end = min(n, start + max_chars)
+        chunk = text[start:end].strip()
+        if chunk:
+            chunks.append(chunk)
+        if end == n:
+            break
+        start = max(0, end - overlap)
+    return chunks
+
+
 async def ensure_user_collections(user_id: str, tab_id: str | None = None) -> None:
     """Create docs + meetings collections for a user (and tab) if missing."""
     loop = asyncio.get_running_loop()
@@ -206,6 +222,49 @@ async def add_meeting_summary_embedding(
             ],
         ),
     )
+
+
+async def add_full_transcript_embeddings(
+    user_id: str, meeting_id: str, transcript_text: str
+) -> None:
+    """
+    Embed the full meeting transcript in chunks after the meeting ends.
+
+    This is a safety net — individual chunks are embedded live during the meeting,
+    but this guarantees complete coverage regardless of any dropped chunks.
+    """
+    if settings.app_env == "test":
+        return
+    if not transcript_text or not transcript_text.strip():
+        return
+
+    chunks = _chunk_text(transcript_text)
+    if not chunks:
+        return
+
+    loop = asyncio.get_running_loop()
+    ts = time.time()
+    collection = get_meetings_collection(user_id)
+
+    for idx, chunk in enumerate(chunks):
+        embedding = await loop.run_in_executor(None, get_embedding, chunk)
+        await loop.run_in_executor(
+            None,
+            lambda c=chunk, e=embedding, i=idx: collection.upsert(
+                ids=[f"{meeting_id}_full_{i}"],
+                documents=[c],
+                embeddings=[e.tolist()],
+                metadatas=[
+                    {
+                        "meeting_id": meeting_id,
+                        "user_id": user_id,
+                        "kind": "full_transcript",
+                        "chunk_index": i,
+                        "timestamp": ts,
+                    }
+                ],
+            ),
+        )
 
 
 async def query_meetings(

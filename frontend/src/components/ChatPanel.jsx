@@ -88,10 +88,27 @@ export default function ChatPanel({
                                     : 'bg-slate-100 text-slate-800 rounded-tl-none border border-slate-200'}
               `}>
                                 <p className="whitespace-pre-line break-words">{msg.content}</p>
-                                {msg.sources && (
-                                    <div className="mt-2 pt-2 border-t border-slate-300 text-xs text-slate-500 flex items-center gap-1">
-                                        Sources used
-                                    </div>
+                                {msg.sources && msg.sources.length > 0 && (
+                                    <details className="mt-3 pt-2 border-t border-slate-200">
+                                        <summary className="text-xs text-slate-400 cursor-pointer select-none hover:text-slate-600 transition-colors">
+                                            {msg.sources.length} source{msg.sources.length > 1 ? 's' : ''}
+                                        </summary>
+                                        <ul className="mt-2 space-y-1">
+                                            {msg.sources.map((src, i) => (
+                                                <li key={i} className="text-xs text-slate-500 flex items-start gap-1.5">
+                                                    <span className="text-amber-500 mt-0.5">•</span>
+                                                    <span>
+                                                        <span className="font-medium text-slate-600">{src.title || 'Untitled Meeting'}</span>
+                                                        {src.started_at && (
+                                                            <span className="ml-1 text-slate-400">
+                                                                — {new Date(src.started_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}
+                                                            </span>
+                                                        )}
+                                                    </span>
+                                                </li>
+                                            ))}
+                                        </ul>
+                                    </details>
                                 )}
                             </div>
                         </div>

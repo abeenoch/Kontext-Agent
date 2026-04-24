@@ -146,6 +146,34 @@ class MeetingSession(Base):
 
 
 
+def _derive_title(summary: str | None, started_at: "datetime | str | None" = None) -> str:
+    """Derive a short human-readable title (≤80 chars) from a meeting summary or timestamp."""
+    if summary:
+        # 1. Look for a ## heading
+        for line in summary.splitlines():
+            stripped = line.strip()
+            if stripped.startswith("## "):
+                heading = stripped[3:].strip()
+                return heading[:80]
+        # 2. First non-empty sentence
+        import re as _re
+        sentences = _re.split(r"[.!?]", summary)
+        for sentence in sentences:
+            clean = sentence.strip()
+            if clean:
+                return clean[:80]
+    # 3. Fall back to formatted timestamp
+    if started_at is not None:
+        if isinstance(started_at, str):
+            try:
+                started_at = datetime.fromisoformat(started_at)
+            except ValueError:
+                return f"Meeting on {started_at}"[:80]
+        return f"Meeting on {started_at.strftime('%b %d, %Y at %I:%M %p')}"
+    # 4. Ultimate fallback
+    return "Untitled Meeting"
+
+
 async def init_db() -> None:
     """Create all tables if they do not exist."""
     async with engine.begin() as conn:
@@ -174,6 +202,19 @@ async def init_db() -> None:
             try:
                 await conn.execute(
                     text("ALTER TABLE doc_ingestion_jobs ADD COLUMN tab_id VARCHAR")
+                )
+            except Exception:
+                pass
+
+        # Add meeting_title column to meeting_summaries if missing
+        try:
+            await conn.execute(
+                text("ALTER TABLE meeting_summaries ADD COLUMN IF NOT EXISTS meeting_title VARCHAR(80)")
+            )
+        except Exception:
+            try:
+                await conn.execute(
+                    text("ALTER TABLE meeting_summaries ADD COLUMN meeting_title VARCHAR(80)")
                 )
             except Exception:
                 pass
@@ -527,6 +568,39 @@ async def save_meeting_summary(user_id: str, meeting_id: str, summary: str) -> N
         await session.commit()
 
 
+async def save_meeting_title(user_id: str, meeting_id: str, title: str) -> None:
+    """Update the meeting_title for an existing meeting_summaries row (no-op if row absent)."""
+    async with SessionLocal() as session:
+        await session.execute(
+            text(
+                "UPDATE meeting_summaries SET meeting_title = :title "
+                "WHERE user_id = :uid AND meeting_id = :mid"
+            ),
+            {"title": title[:80], "uid": user_id, "mid": meeting_id},
+        )
+        await session.commit()
+
+
+async def get_meeting_title(user_id: str, meeting_id: str) -> str:
+    """Return the stored title for a meeting, falling back to _derive_title."""
+    async with SessionLocal() as session:
+        result = await session.execute(
+            text(
+                "SELECT ms.meeting_title, MIN(mt.timestamp) as started_at "
+                "FROM meeting_summaries ms "
+                "LEFT JOIN meeting_transcripts mt ON ms.user_id = mt.user_id AND ms.meeting_id = mt.meeting_id "
+                "WHERE ms.user_id = :uid AND ms.meeting_id = :mid "
+                "GROUP BY ms.meeting_title"
+            ),
+            {"uid": user_id, "mid": meeting_id},
+        )
+        row = result.fetchone()
+        if row and row[0]:
+            return row[0]
+        started_at = str(row[1]) if row and row[1] else None
+        return _derive_title(None, started_at)
+
+
 async def save_periodic_summary(user_id: str, meeting_id: str, summary: str) -> None:
     """Persist a periodic (in-meeting) summary snapshot."""
     encrypted = encrypt_text(summary, ENCRYPTION_KEY)
@@ -600,10 +674,11 @@ async def list_meetings(user_id: str, limit: int = 50) -> list[dict]:
     async with SessionLocal() as session:
         result = await session.execute(
             text(
-                "SELECT DISTINCT meeting_id, MIN(timestamp) as started_at "
-                "FROM meeting_transcripts "
-                "WHERE user_id = :uid "
-                "GROUP BY meeting_id "
+                "SELECT mt.meeting_id, MIN(mt.timestamp) as started_at, ms.meeting_title "
+                "FROM meeting_transcripts mt "
+                "LEFT JOIN meeting_summaries ms ON mt.user_id = ms.user_id AND mt.meeting_id = ms.meeting_id "
+                "WHERE mt.user_id = :uid "
+                "GROUP BY mt.meeting_id, ms.meeting_title "
                 "ORDER BY started_at DESC "
                 "LIMIT :limit"
             ),
@@ -612,12 +687,19 @@ async def list_meetings(user_id: str, limit: int = 50) -> list[dict]:
         rows = result.fetchall()
         meetings = []
         for row in rows:
-            has_summary = await get_meeting_summary(user_id, row[0])
+            meeting_id, started_at_raw, meeting_title = row[0], row[1], row[2]
+            started_at_str = str(started_at_raw) if started_at_raw else None
+            has_summary = await get_meeting_summary(user_id, meeting_id)
+            if meeting_title:
+                title = meeting_title
+            else:
+                title = _derive_title(None, started_at_str)
             meetings.append(
                 {
-                    "meeting_id": row[0],
-                    "started_at": str(row[1]) if row[1] else None,
+                    "meeting_id": meeting_id,
+                    "started_at": started_at_str,
                     "has_summary": has_summary is not None,
+                    "title": title,
                 }
             )
         return meetings

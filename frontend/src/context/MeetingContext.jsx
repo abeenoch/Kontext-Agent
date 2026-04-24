@@ -143,17 +143,32 @@ export function MeetingProvider({ children }) {
   const sendMeetingChat = useCallback(
     async (text, voiceAudio = null) => {
       const targetMeetingId = meetingId || 'recent';
+      const isCrossMeeting = ['any', 'recent', 'latest'].includes(targetMeetingId) || !meetingId;
 
       const userMsg = { role: 'user', content: text || '(Voice Message)' };
       setChatMessages((prev) => [...prev, userMsg]);
       setIsChatLoading(true);
 
       try {
-        const response = await api.post(`/meeting/${targetMeetingId}/chat`, {
-          query: text,
-          voice_audio: voiceAudio,
-        });
-        const aiMsg = { role: 'assistant', content: response.data.response };
+        let content, sources;
+
+        if (isCrossMeeting) {
+          const response = await api.post('/meeting/search', {
+            query: text,
+            date_hint: null,
+          });
+          content = response.data.answer;
+          sources = response.data.sources?.length ? response.data.sources : null;
+        } else {
+          const response = await api.post(`/meeting/${targetMeetingId}/chat`, {
+            query: text,
+            voice_audio: voiceAudio,
+          });
+          content = response.data.response;
+          sources = null;
+        }
+
+        const aiMsg = { role: 'assistant', content, sources };
         setChatMessages((prev) => [...prev, aiMsg]);
       } catch (error) {
         console.error('Chat error:', error);

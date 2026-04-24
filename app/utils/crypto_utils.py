@@ -49,15 +49,23 @@ def decrypt_text(token: Optional[str], key_material: str) -> str:
     """
     Decrypt base64(nonce + ciphertext+tag) produced by encrypt_text.
     Returns empty string for None/empty input.
+    Falls back to returning the raw value for legacy unencrypted records.
     """
     if not token:
         return ""
-    data = base64.b64decode(token)
+    try:
+        data = base64.b64decode(token)
+    except Exception:
+        # Not valid base64 — legacy plain-text record, return as-is
+        return token
+    if len(data) <= 12:
+        # Too short to be a valid nonce+ciphertext — treat as plain text
+        return token
     nonce, ct = data[:12], data[12:]
     aesgcm = get_aesgcm(key_material)
     try:
         pt = aesgcm.decrypt(nonce, ct, None)
         return pt.decode("utf-8")
     except Exception:
-        # Corrupt or wrong key: fail closed with empty string to avoid crashing flows.
-        return ""
+        # Wrong key or corrupt — return raw value rather than silently dropping it
+        return token

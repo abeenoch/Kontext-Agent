@@ -28,7 +28,7 @@ logger = get_logger(__name__)
 settings = get_settings()
 router = APIRouter(prefix="/docs", tags=["Documents"])
 
-MAX_FILE_SIZE_MB = 50
+MAX_FILE_SIZE_MB = 300
 ALLOWED_FILE_TYPES = ["pdf", "txt"]
 
 

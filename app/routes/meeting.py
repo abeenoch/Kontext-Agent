@@ -22,8 +22,11 @@ from app.services.integrations_service import (
 from app.services.chat_memory import (
     save_meeting_chunk,
     save_meeting_summary,
+    save_meeting_title,
+    _derive_title,
     get_meeting_summary,
     get_meeting_transcript,
+    get_meeting_title,
     list_meetings,
     delete_meeting_data,
     upsert_meeting_session,
@@ -34,9 +37,11 @@ from app.services.vector_store import (
     ensure_user_collections,
     add_meeting_chunk_embedding,
     add_meeting_summary_embedding,
+    add_full_transcript_embeddings,
     query_meetings,
     delete_meeting_embeddings,
 )
+from app.services.meeting_search import cross_meeting_search, CrossMeetingSearchResult
 from app.auth import get_current_user, get_current_user_ws
 from app.config import get_settings
 from app.logger import get_logger
@@ -76,6 +81,12 @@ class MeetingChatRequest(BaseModel):
     voice_audio: str | None = None  # optional base64 PCM for voice input
 
 
+class MeetingSearchRequest(BaseModel):
+    """Cross-meeting search request."""
+    query: str
+    date_hint: str | None = None
+
+
 class MeetingChatResponse(BaseModel):
     """Post-meeting chat response."""
     response: str
@@ -99,6 +110,7 @@ class MeetingListItem(BaseModel):
     meeting_id: str
     started_at: str | None
     has_summary: bool
+    title: str = ""
 
 
 
@@ -394,11 +406,23 @@ async def meeting_websocket(websocket: WebSocket) -> None:
                         )
 
                         await save_meeting_summary(user_id, meeting_id, final_summary)
+                        try:
+                            _title = _derive_title(final_summary, datetime.now())
+                            await save_meeting_title(user_id, meeting_id, _title)
+                        except Exception as _exc:
+                            logger.warning("Failed to save meeting title: %s", _exc)
                         asyncio.create_task(
                             add_meeting_summary_embedding(
                                 user_id=user_id,
                                 meeting_id=meeting_id,
                                 summary_text=final_summary,
+                            )
+                        )
+                        asyncio.create_task(
+                            add_full_transcript_embeddings(
+                                user_id=user_id,
+                                meeting_id=meeting_id,
+                                transcript_text=full_transcript,
                             )
                         )
                         await safe_send_json(
@@ -415,11 +439,23 @@ async def meeting_websocket(websocket: WebSocket) -> None:
                     logger.error("Summary generation error: %s", exc, exc_info=True)
                     fallback_summary = _fallback_summary_from_transcript(full_transcript if 'full_transcript' in locals() else "")
                     await save_meeting_summary(user_id, meeting_id, fallback_summary)
+                    try:
+                        _title = _derive_title(fallback_summary, datetime.now())
+                        await save_meeting_title(user_id, meeting_id, _title)
+                    except Exception as _exc:
+                        logger.warning("Failed to save meeting title: %s", _exc)
                     asyncio.create_task(
                         add_meeting_summary_embedding(
                             user_id=user_id,
                             meeting_id=meeting_id,
                             summary_text=fallback_summary,
+                        )
+                    )
+                    asyncio.create_task(
+                        add_full_transcript_embeddings(
+                            user_id=user_id,
+                            meeting_id=meeting_id,
+                            transcript_text=full_transcript if 'full_transcript' in locals() else "",
                         )
                     )
                     await safe_send_json(
@@ -458,11 +494,12 @@ async def meeting_websocket(websocket: WebSocket) -> None:
                     if not summary:
                         await safe_send_json({"type": "error", "message": "No summary available to email"})
                         continue
+                    meeting_title = await get_meeting_title(user_id, meeting_id)
                     loop = asyncio.get_running_loop()
                     await loop.run_in_executor(
                         None,
                         lambda: send_meeting_summary_email(
-                            email, f"Meeting Summary - {meeting_id}", summary
+                            email, f"Meeting Summary - {meeting_title}", summary
                         ),
                     )
                     await safe_send_json(
@@ -575,6 +612,20 @@ async def meeting_websocket(websocket: WebSocket) -> None:
 
 
 
+@router.post("/search", response_model=CrossMeetingSearchResult)
+async def meeting_search(
+    request: MeetingSearchRequest,
+    current_user: str = Depends(get_current_user),
+) -> CrossMeetingSearchResult:
+    """Search across all meetings using natural language, with optional temporal filtering."""
+    if not request.query or not request.query.strip():
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Query cannot be empty",
+        )
+    return await cross_meeting_search(current_user, request.query, request.date_hint)
+
+
 @router.get("/history", response_model=list[MeetingListItem])
 async def meeting_history(
     current_user: str = Depends(get_current_user),
@@ -661,44 +712,10 @@ async def meeting_chat(
 
     query_lower = query.lower()
 
-    # If special "recent"/"any" mode: search across all meetings via vector DB
+    # If special "recent"/"any" mode: delegate to cross_meeting_search pipeline
     if special_any:
-        try:
-            context_chunks = await query_meetings(
-                user_id=current_user,
-                query=query,
-                meeting_id=None,
-                n_results=8,
-            )
-        except Exception as exc:
-            logger.warning("Global meeting RAG retrieval failed: %s", exc)
-            context_chunks = []
-
-        if not context_chunks:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="No past meetings available for this query.",
-            )
-
-        global_context = redact_pii("\n\n".join(context_chunks))
-        sanitized_query = redact_pii(query)
-        prompt = (
-            "You are an AI meeting assistant. Answer the user's question using the past meeting context below.\n\n"
-            f"Context snippets:\n{global_context}\n\n"
-            f"User question: {sanitized_query}\n\n"
-            "Provide a clear, helpful answer grounded in the provided context."
-        )
-
-        try:
-            response_text = await query_llm(prompt)
-            return MeetingChatResponse(response=response_text)
-        except httpx.HTTPStatusError as exc:
-            if exc.response.status_code == 503:
-                raise HTTPException(
-                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                    detail="LLM provider temporarily unavailable. Please retry shortly.",
-                )
-            raise
+        result = await cross_meeting_search(current_user, query)
+        return MeetingChatResponse(response=result.answer)
 
     transcript = await get_meeting_transcript(current_user, meeting_id)
     if not transcript:
@@ -757,11 +774,12 @@ async def meeting_chat(
             loop = asyncio.get_running_loop()
             sent: list[str] = []
             failed: list[str] = []
+            meeting_title = await get_meeting_title(current_user, meeting_id)
             for recipient in recipients:
                 ok = await loop.run_in_executor(
                     None,
                     lambda r=recipient: send_meeting_summary_email(
-                        r, f"Meeting Summary - {meeting_id}", summary
+                        r, f"Meeting Summary - {meeting_title}", summary
                     ),
                 )
                 if ok:

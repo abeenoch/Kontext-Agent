@@ -11,6 +11,7 @@ venv/
 *.egg-info
 # IDE
 .vscode/
+
 # OS
 .DS_Store
 Thumbs.db
