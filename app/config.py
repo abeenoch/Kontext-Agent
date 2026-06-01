@@ -24,8 +24,33 @@ class Settings(BaseSettings):
     groq_api_key: str = os.getenv("GROQ_API_KEY", "")
     groq_url: str = "https://api.groq.com/openai/v1/chat/completions"
     groq_model: str = os.getenv("GROQ_MODEL", "openai/gpt-oss-120b")
+    llm_provider: str = os.getenv("LLM_PROVIDER", "groq").lower()
     llm_temperature: float = float(os.getenv("LLM_TEMPERATURE", "0.7"))
     llm_timeout: float = float(os.getenv("LLM_TIMEOUT", "30.0"))
+    groq_input_cost_per_1k_tokens: float = float(
+        os.getenv("GROQ_INPUT_COST_PER_1K_TOKENS", "0.0")
+    )
+    groq_output_cost_per_1k_tokens: float = float(
+        os.getenv("GROQ_OUTPUT_COST_PER_1K_TOKENS", "0.0")
+    )
+
+    ollama_base_url: str = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
+    ollama_model: str = os.getenv("OLLAMA_MODEL", "llama3.1:8b")
+    ollama_timeout: float = float(os.getenv("OLLAMA_TIMEOUT", "30.0"))
+    ollama_keep_alive: str = os.getenv("OLLAMA_KEEP_ALIVE", "30m")
+    ollama_input_cost_per_1k_tokens: float = float(
+        os.getenv("OLLAMA_INPUT_COST_PER_1K_TOKENS", "0.0")
+    )
+    ollama_output_cost_per_1k_tokens: float = float(
+        os.getenv("OLLAMA_OUTPUT_COST_PER_1K_TOKENS", "0.0")
+    )
+
+    otel_service_name: str = os.getenv("OTEL_SERVICE_NAME", "kontext-agent")
+    otel_exporter_otlp_endpoint: str = os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT", "")
+    otel_exporter_otlp_headers: str = os.getenv("OTEL_EXPORTER_OTLP_HEADERS", "")
+    otel_traces_enabled: bool = (
+        os.getenv("OTEL_TRACES_ENABLED", "true").lower() == "true"
+    )
 
     deepgram_api_key: str = os.getenv("DEEPGRAM_API_KEY", "")
     deepgram_model: str = os.getenv("DEEPGRAM_MODEL", "nova-3")

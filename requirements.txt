@@ -21,6 +21,9 @@ bcrypt==4.0.1
 sqlalchemy>=2.0
 pyjwt
 httpx
+prometheus-client
+opentelemetry-sdk
+opentelemetry-exporter-otlp-proto-http
 # Deepgram SDK 6.x currently breaks streaming handshake in our container build.
 # Pin to the last known-good version that works with this code.
 deepgram-sdk==5.3.2

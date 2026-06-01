@@ -27,6 +27,8 @@ except Exception:
 from app.services.chat_memory import init_db
 from app.config import get_settings
 from app.logger import get_logger
+from app.services.llm_agent import close_query_llm_client
+from app.services.llm_telemetry import configure_tracing
 from app.utils.embedding_utils import preload_embedding_model
 
 logger = get_logger(__name__)
@@ -38,6 +40,7 @@ settings.validate_security()
 async def lifespan(application: FastAPI):
     """Application startup and shutdown lifecycle."""
     logger.info("Starting Kontext Agent")
+    configure_tracing()
     await init_db()
     logger.info("Database initialized")
     if settings.app_env != "test" and settings.preload_embeddings:
@@ -48,6 +51,7 @@ async def lifespan(application: FastAPI):
     else:
         logger.info("Skipping embedding preload (env setting or test mode)")
     yield
+    await close_query_llm_client()
     logger.info("Shutting down Kontext Agent")
 
 
@@ -77,12 +81,14 @@ from app.routes.auth import router as auth_router
 from app.routes.chat import router as chat_router
 from app.routes.docs import router as docs_router
 from app.routes.meeting import router as meeting_router
+from app.routes.metrics import router as metrics_router
 from app.routes.voice_chat import router as voice_chat_router
 
 app.include_router(auth_router)
 app.include_router(chat_router)
 app.include_router(docs_router)
 app.include_router(meeting_router)
+app.include_router(metrics_router)
 app.include_router(voice_chat_router)
 
 

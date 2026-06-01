@@ -19,6 +19,26 @@ os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite:///./test.db")
 # Disable Chroma telemetry during tests to avoid background-thread crashes on exit.
 os.environ.setdefault("ANONYMIZED_TELEMETRY", "False")
 os.environ.setdefault("CHROMA_TELEMETRY_ENABLED", "False")
+os.environ.setdefault("PYDANTIC_DISABLE_PLUGINS", "1")
+
+# Compatibility shim for older opentelemetry builds that omit log record aliases
+# expected by some optional plugins in the local Python environment.
+try:
+    import opentelemetry.sdk._logs as _otel_logs
+
+    if not hasattr(_otel_logs, "LogData"):
+        class _LogData:
+            pass
+
+        _otel_logs.LogData = _LogData
+
+    if not hasattr(_otel_logs, "ReadableLogRecord"):
+        class _ReadableLogRecord:
+            pass
+
+        _otel_logs.ReadableLogRecord = _ReadableLogRecord
+except Exception:
+    pass
 
 # Replace chromadb with a minimal in-memory stub for smoke tests.
 if "chromadb" not in sys.modules:

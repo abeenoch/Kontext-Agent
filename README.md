@@ -4,7 +4,8 @@ Full-stack meeting and knowledge assistant with real-time transcription, periodi
 
 ## What's Inside
 - **Backend:** FastAPI (`app/`), Postgres for auth/chat/meeting data (transcripts and summaries encrypted at rest), ChromaDB (`chroma_db/`) for vectors.
-- **LLM:** Groq chat completions with configurable model and temperature; PII is scrubbed before prompts.
+- **LLM:** Groq or Ollama chat completions with configurable model and temperature; PII is scrubbed before prompts.
+- **Telemetry:** OpenTelemetry traces for every LLM call plus Prometheus metrics for latency, TTFT, throughput, errors, and estimated cost.
 - **Speech:** Deepgram STT (meetings and voice chat) and TTS.
 - **Frontend:** React 19 + Vite + Tailwind (`frontend/`).
 - **Integrations:** SMTP email, Notion export, JWT auth with signup/login/reset, rate limiting, meeting delete, and retention/TTL.
@@ -28,13 +29,22 @@ Copy `.env.example` to `.env` and set at least:
 - `PRELOAD_EMBEDDINGS` (set to `true` to download the embedding model at startup; defaults to `false` to speed container health checks)
 
 Common optional keys:
-- `GROQ_MODEL`, `LLM_TEMPERATURE`, `LLM_TIMEOUT`
+- `LLM_PROVIDER` (`groq` or `ollama`), `GROQ_MODEL`, `OLLAMA_MODEL`
+- `LLM_TEMPERATURE`, `LLM_TIMEOUT`, `OLLAMA_TIMEOUT`, `OLLAMA_KEEP_ALIVE`
+- `OTEL_SERVICE_NAME`, `OTEL_TRACES_ENABLED`, `OTEL_EXPORTER_OTLP_ENDPOINT`
+
 - `EMBEDDING_MODEL` (defaults to `all-MiniLM-L6-v2`)
 - `CHROMA_DIR`
 - `MEETING_RETENTION_DAYS` (default 90), `PERIODIC_SUMMARY_LOOKBACK_MINUTES` (default 10)
 - `SMTP_HOST/PORT/USER/PASS` for email
 - `NOTION_TOKEN`, `NOTION_PAGE_ID`
 - `CORS_ORIGINS`, `FRONTEND_URL`, `RATE_LIMIT_REQUESTS`, `RATE_LIMIT_PERIOD`
+
+To switch the backend to Ollama locally:
+- set `LLM_PROVIDER=ollama`
+- make sure Ollama is running on `OLLAMA_BASE_URL` and pull the model named in `OLLAMA_MODEL`
+- use a small CPU-friendly  model such as `phi3:mini` or `gemma2:2b` for low-RAM if you dont have a GPU
+- increase `OLLAMA_KEEP_ALIVE` if you want the model to stay warm between requests
 
 ## Local Development
 Backend (Python 3.11):
@@ -120,6 +130,7 @@ docker compose up --build
 
 ## API Quick Reference
 - `GET /` and `GET /health`
+- `GET /metrics` - Prometheus scrape endpoint for LLM telemetry(in the works)
 - `POST /auth/signup | /login | /forgot-password | /reset-password`
 - `WS /meeting/ws` - send audio; `STOP` to finalize; `ACTION: EMAIL <addr>` or `ACTION: NOTION` to export
 - `GET /meeting/history`, `/meeting/{id}/transcript`, `/meeting/{id}/summary`

@@ -1,6 +1,10 @@
-"""Kontext Agent application package."""
+"""Process-wide compatibility shims loaded by Python at startup."""
 
-try:  # pragma: no cover - defensive compatibility shim
+import os
+
+os.environ.setdefault("PYDANTIC_DISABLE_PLUGINS", "1")
+
+try:  # pragma: no cover - startup shim
     import opentelemetry.sdk._logs as _otel_logs
 
     if not hasattr(_otel_logs, "LogData"):

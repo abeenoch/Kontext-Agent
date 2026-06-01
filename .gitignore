@@ -9,6 +9,10 @@ venv/
 .env.*
 *.sqlite3
 *.egg-info
+test.db
+data/
+benchmarks/
+scripts/
 # IDE
 .vscode/
 .kiro/
@@ -23,6 +27,8 @@ tmp/
 *.txt
 # Docker
 *.log
+frontend/dist/
+frontend/node_modules/
 
 # Local/system artifacts
 Microsoft/
