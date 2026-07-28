@@ -660,7 +660,6 @@ npm run lint
 
 ## Author
 
-- LinkedIn: [https://linkedin.com/in/Enoch Abe](https://linkedin.com/in/Enoch Abe)
 - X (Twitter): [https://x.com/industryshark](https://x.com/industryshark)
 
 ## Badges
