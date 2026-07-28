@@ -10,6 +10,13 @@ def test_heading_extracted():
     assert _derive_title(summary) == "My Heading"
 
 
+def test_generic_overview_heading_uses_content():
+    """A boilerplate ## Overview heading should not become the title."""
+    summary = "## Overview\n- Long meeting about launch readiness and customer feedback."
+    result = _derive_title(summary)
+    assert result == "Long meeting about launch readiness and customer feedback"
+
+
 def test_heading_truncated_to_80():
     """Summary with a very long ## heading → title is truncated to 80 chars."""
     long_heading = "A Very Long Heading That Exceeds Eighty Characters In Total Length Here"

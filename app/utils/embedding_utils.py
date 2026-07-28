@@ -1,9 +1,16 @@
+import os
+
 from app.config import get_settings
 from app.logger import get_logger
 
 _model = None
 _model_name = None
 _logger = get_logger(__name__)
+
+# sentence-transformers pulls in transformers, which can otherwise detect
+# TensorFlow/JAX from a polluted global install and fail during import.
+os.environ.setdefault("USE_TF", "0")
+os.environ.setdefault("USE_FLAX", "0")
 
 
 def _ensure_model_loaded():

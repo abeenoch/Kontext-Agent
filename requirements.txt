@@ -4,6 +4,7 @@ websockets
 pydantic-settings
 pydantic[email]
 numpy<2.0
+ml_dtypes>=0.5
 groq
 sentence-transformers
 tokenizers>=0.14,<0.19

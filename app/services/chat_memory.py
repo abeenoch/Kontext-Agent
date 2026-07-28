@@ -149,20 +149,54 @@ class MeetingSession(Base):
 def _derive_title(summary: str | None, started_at: "datetime | str | None" = None) -> str:
     """Derive a short human-readable title (≤80 chars) from a meeting summary or timestamp."""
     if summary:
-        # 1. Look for a ## heading
+        # 1. Prefer a meaningful markdown heading over boilerplate section labels.
         for line in summary.splitlines():
             stripped = line.strip()
             if stripped.startswith("## "):
-                heading = stripped[3:].strip()
-                return heading[:80]
-        # 2. First non-empty sentence
+                heading = " ".join(stripped[3:].split()).strip(" -*•\t\r\n:;.,")
+                if heading and heading.lower() not in {
+                    "overview",
+                    "meeting overview",
+                    "summary",
+                    "meeting summary",
+                    "final summary",
+                    "recap",
+                    "notes",
+                    "agenda",
+                }:
+                    return heading[:80]
+
+        # 2. Fall back to the first substantive content line.
         import re as _re
-        sentences = _re.split(r"[.!?]", summary)
-        for sentence in sentences:
-            clean = sentence.strip()
-            if clean:
-                return clean[:80]
-    # 3. Fall back to formatted timestamp
+
+        for line in summary.splitlines():
+            stripped = line.strip()
+            if not stripped or stripped.startswith("#"):
+                continue
+            stripped = stripped.lstrip("-*• ").strip()
+            if not stripped:
+                continue
+            candidate = " ".join(_re.split(r"[.!?]", stripped, maxsplit=1)[0].split()).strip(
+                " -*•\t\r\n:;.,"
+            )
+            if candidate and candidate.lower() not in {
+                "overview",
+                "meeting overview",
+                "summary",
+                "meeting summary",
+                "final summary",
+                "recap",
+                "notes",
+                "agenda",
+            }:
+                return candidate[:80]
+
+        # 3. Use the first sentence from the summary as a last summary-based fallback.
+        sentence = " ".join(_re.split(r"[.!?]", summary, maxsplit=1)[0].split()).strip(" -*•\t\r\n:;.,")
+        if sentence:
+            return sentence[:80]
+
+    # 4. Fall back to formatted timestamp
     if started_at is not None:
         if isinstance(started_at, str):
             try:
