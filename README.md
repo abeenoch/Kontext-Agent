@@ -4,7 +4,7 @@ Intelligent meeting and knowledge assistant that captures conversations, transcr
 
 ## Overview
 
-Kontext Agent helps you stay on top of meetings by transcribing speech as it happens, generating structured summaries, and making everything searchable. You can ask questions about past meetings or documents, export summaries to email or Notion, and keep your knowledge organized without switching between tools. It handles the heavy lifting so you can focus on the conversation.
+Kontext Agent helps you stay on top of meetings by transcribing speech as it happens, generating structured summaries, and making everything searchable. You can ask questions about past meetings or documents, export summaries to email, Notion, or Slack, and keep your knowledge organized without switching between tools. It handles the heavy lifting so you can focus on the conversation.
 
 ## System Architecture
 
@@ -39,6 +39,7 @@ flowchart LR
 - Node.js 20+
 - PostgreSQL (optional for dev, required for production)
 - A Deepgram API key, Groq or Ollama credentials
+- (Optional) Slack Bot Token for Slack integration
 
 ### Backend Setup
 
@@ -108,8 +109,10 @@ While a meeting is active, you can send special commands:
 
 - `ACTION: EMAIL recipient@example.com` to email the current summary
 - `ACTION: NOTION` to push the summary to your Notion page
+- `ACTION: SLACK` to post the summary to the default Slack channel
+- `ACTION: SLACK #channel-name` to post to a specific Slack channel
 
-After a meeting, use the "Chat with Transcript" tab to ask questions about the discussion, request a summary email, or export to Notion.
+After a meeting, use the "Chat with Transcript" tab to ask questions about the discussion, request a summary email, export to Notion, or post to Slack. The Summary panel also has one-click buttons for each integration.
 
 ### Searching Across Meetings
 
@@ -211,6 +214,22 @@ Upload PDFs and text documents. The system chunks, embeds, and indexes them in C
 
 Transcripts and summaries are encrypted at rest using AES-GCM. PII is redacted before any LLM call. Meeting data is automatically pruned after a configurable retention period. Users can hard-delete meeting records and associated embeddings.
 
+### Slack Integration
+
+Post meeting summaries directly to any Slack channel with a single click or natural language command. Summaries are formatted using Slack Block Kit for clean, readable output with a header, section breakdown, and a Kontext Agent footer.
+
+**Setup:**
+1. Go to [https://api.slack.com/apps](https://api.slack.com/apps) → **Create New App** → **From scratch**
+2. Under **OAuth & Permissions**, add the `chat:write` Bot Token Scope
+3. Click **Install to Workspace** and copy the **Bot User OAuth Token** (`xoxb-...`)
+4. Invite the bot to your target channel in Slack: `/invite @YourBotName`
+5. Set `SLACK_BOT_TOKEN` and `SLACK_DEFAULT_CHANNEL` in your `.env`
+
+**Usage:**
+- Click the Slack button in the Summary panel
+- Send `ACTION: SLACK` or `ACTION: SLACK #channel-name` over the WebSocket during a meeting
+- In the chat tab: *"post this to slack"* or *"send summary to slack #engineering"*
+
 ## Technologies Used
 
 | Technology    | Role                                 |
@@ -224,6 +243,7 @@ Transcripts and summaries are encrypted at rest using AES-GCM. PII is redacted b
 | ChromaDB      | Vector store for semantic search     |
 | Deepgram      | Speech-to-text and text-to-speech    |
 | Groq / Ollama  | LLM provider (configurable)          |
+| Slack SDK     | Slack Bot integration                |
 | OpenTelemetry | Tracing & monitoring                 |
 | Prometheus    | Metrics collection                   |
 | Docker        | Containerization                     |
@@ -333,7 +353,7 @@ All endpoints are prefixed with the configured base URL (default `http://localho
 
 #### WS /meeting/ws
 
-**Description**: Real-time meeting transcription via WebSocket. Send binary PCM16 audio frames and receive JSON transcript events. Supports `STOP` command to end the meeting and generate a final summary, `ACTION: EMAIL <addr>` and `ACTION: NOTION` for exports. Also accepts `{"type":"config","sample_rate":16000}` to adjust audio format.
+**Description**: Real-time meeting transcription via WebSocket. Send binary PCM16 audio frames and receive JSON transcript events. Supports `STOP` command to end the meeting and generate a final summary, `ACTION: EMAIL <addr>`, `ACTION: NOTION`, and `ACTION: SLACK [#channel]` for exports. Also accepts `{"type":"config","sample_rate":16000}` to adjust audio format.
 
 **Authentication**: Query parameter `?token=` or Bearer token in header.
 
@@ -633,6 +653,9 @@ All endpoints are prefixed with the configured base URL (default `http://localho
 | `ENCRYPTION_KEY` | Key for AES-GCM encryption of transcripts (falls back to `JWT_SECRET`) | Optional |
 | `SMTP_HOST` / `SMTP_USER` / `SMTP_PASS` | SMTP credentials for email summaries | Optional |
 | `NOTION_TOKEN` | Notion integration token | Optional |
+| `NOTION_PAGE_ID` | Notion parent page ID to create summary pages under | Optional |
+| `SLACK_BOT_TOKEN` | Slack Bot User OAuth Token (`xoxb-...`) | Optional |
+| `SLACK_DEFAULT_CHANNEL` | Default Slack channel to post summaries to (e.g. `#general`) | Optional |
 | `CORS_ORIGINS` | Comma-separated allowed origins | Yes (production) |
 | `FRONTEND_URL` | Frontend URL for password reset link | Optional |
 | `CHROMA_DIR` | Directory for ChromaDB persistence | Yes |

@@ -149,8 +149,25 @@ class MeetingSession(Base):
 def _derive_title(summary: str | None, started_at: "datetime | str | None" = None) -> str:
     """Derive a short human-readable title (≤80 chars) from a meeting summary or timestamp."""
     if summary:
-        # 1. Prefer a meaningful markdown heading over boilerplate section labels.
-        for line in summary.splitlines():
+        # 1. Prefer the explicit ## Title section added by the summarizer prompt.
+        lines = summary.splitlines()
+        for i, line in enumerate(lines):
+            if line.strip().lower() in {"## title", "## title:"}:
+                # The title content is on the next non-empty line(s) until the next heading
+                for j in range(i + 1, min(i + 4, len(lines))):
+                    candidate = lines[j].strip().lstrip("-*• ").strip(" -*•\t\r\n:;.,")
+                    if candidate and not candidate.startswith("#"):
+                        candidate_lower = candidate.lower()
+                        if candidate_lower not in {
+                            "overview", "meeting overview", "summary",
+                            "meeting summary", "final summary", "recap",
+                            "notes", "agenda", "title",
+                        }:
+                            return candidate[:80]
+                break
+
+        # 2. Fall back to a meaningful markdown heading over boilerplate section labels.
+        for line in lines:
             stripped = line.strip()
             if stripped.startswith("## "):
                 heading = " ".join(stripped[3:].split()).strip(" -*•\t\r\n:;.,")
@@ -163,6 +180,7 @@ def _derive_title(summary: str | None, started_at: "datetime | str | None" = Non
                     "recap",
                     "notes",
                     "agenda",
+                    "title",
                 }:
                     return heading[:80]
 

@@ -85,6 +85,9 @@ class Settings(BaseSettings):
     notion_token: str = os.getenv("NOTION_TOKEN", "")
     notion_page_id: str = os.getenv("NOTION_PAGE_ID", "")
 
+    slack_bot_token: str = os.getenv("SLACK_BOT_TOKEN", "")
+    slack_default_channel: str = os.getenv("SLACK_DEFAULT_CHANNEL", "#general")
+
     jwt_secret: str = os.getenv("JWT_SECRET", "your-secret-key-change-in-production")
     jwt_algorithm: str = "HS256"
     jwt_expiry_hours: int = int(os.getenv("JWT_EXPIRY_HOURS", "24"))

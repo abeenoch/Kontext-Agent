@@ -5,6 +5,8 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 
 from notion_client import Client
+from slack_sdk import WebClient
+from slack_sdk.errors import SlackApiError
 
 from app.config import get_settings
 from app.logger import get_logger
@@ -252,4 +254,124 @@ def push_meeting_summary_to_notion(summary: str, meeting_title: str = "New Meeti
 
     except Exception as e:
         logger.error("Error pushing to Notion: %s", e, exc_info=True)
+        return False
+
+
+def _summary_to_slack_blocks(summary: str, meeting_title: str) -> list[dict]:
+    """
+    Convert a Markdown meeting summary into Slack Block Kit blocks.
+
+    Slack blocks give a nicely formatted message with a header, divider,
+    and each Markdown section rendered as mrkdwn text.
+    """
+    blocks: list[dict] = [
+        {
+            "type": "header",
+            "text": {
+                "type": "plain_text",
+                "text": f":memo: {meeting_title}",
+                "emoji": True,
+            },
+        },
+        {"type": "divider"},
+    ]
+
+    # Accumulate lines into sections; flush when a heading is hit or at end.
+    current_lines: list[str] = []
+
+    def flush_section() -> None:
+        text = "\n".join(current_lines).strip()
+        if text:
+            # Slack mrkdwn text field is capped at 3000 chars.
+            blocks.append(
+                {
+                    "type": "section",
+                    "text": {"type": "mrkdwn", "text": text[:3000]},
+                }
+            )
+        current_lines.clear()
+
+    for raw in summary.splitlines():
+        line = raw.strip()
+        if not line:
+            continue
+
+        if line.startswith("## "):
+            flush_section()
+            # Render h2 as bold heading line
+            current_lines.append(f"*{line[3:].strip()}*")
+        elif line.startswith("### "):
+            flush_section()
+            current_lines.append(f"_*{line[4:].strip()}*_")
+        elif line.startswith("- "):
+            current_lines.append(f"• {line[2:].strip()}")
+        else:
+            current_lines.append(line)
+
+    flush_section()
+
+    blocks.append({"type": "divider"})
+    blocks.append(
+        {
+            "type": "context",
+            "elements": [
+                {
+                    "type": "mrkdwn",
+                    "text": "_Sent by Kontext Agent_",
+                }
+            ],
+        }
+    )
+
+    return blocks
+
+
+def send_meeting_summary_to_slack(
+    summary: str,
+    meeting_title: str = "Meeting Summary",
+    channel: str | None = None,
+) -> bool:
+    """
+    Post a meeting summary to a Slack channel using Block Kit formatting.
+
+    Args:
+        summary: Meeting summary content (Markdown).
+        meeting_title: Human-readable title shown in the Slack header.
+        channel: Target Slack channel (e.g. ``#engineering``).
+                 Falls back to ``settings.slack_default_channel`` when omitted.
+
+    Returns:
+        True if the message was posted successfully, False otherwise.
+    """
+    try:
+        if not settings.slack_bot_token:
+            logger.error("SLACK_BOT_TOKEN is not configured")
+            return False
+
+        target_channel = (channel or settings.slack_default_channel or "#general").strip()
+        if not target_channel:
+            logger.error("No Slack channel specified and SLACK_DEFAULT_CHANNEL is not set")
+            return False
+
+        client = WebClient(token=settings.slack_bot_token)
+        blocks = _summary_to_slack_blocks(summary, meeting_title)
+
+        client.chat_postMessage(
+            channel=target_channel,
+            text=f":memo: {meeting_title}",  # fallback text for notifications
+            blocks=blocks,
+        )
+
+        logger.info("Meeting summary posted to Slack channel %s", target_channel)
+        return True
+
+    except SlackApiError as e:
+        logger.error(
+            "Slack API error posting to %s: %s",
+            channel or settings.slack_default_channel,
+            e.response["error"],
+        )
+        return False
+    except Exception as e:
+        logger.error("Error posting to Slack: %s", e, exc_info=True)
         return False

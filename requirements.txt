@@ -9,6 +9,7 @@ groq
 sentence-transformers
 tokenizers>=0.14,<0.19
 notion-client
+slack-sdk>=3.19,<4
 requests
 chromadb
 pdfplumber

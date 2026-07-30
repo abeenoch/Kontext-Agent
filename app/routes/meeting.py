@@ -18,6 +18,7 @@ from app.services.summarizer import (
 from app.services.integrations_service import (
     send_meeting_summary_email,
     push_meeting_summary_to_notion,
+    send_meeting_summary_to_slack,
 )
 from app.services.chat_memory import (
     save_meeting_chunk,
@@ -91,6 +92,7 @@ class MeetingChatResponse(BaseModel):
     """Post-meeting chat response."""
     response: str
     audio: str | None = None  # optional base64 TTS audio
+    sources: list[dict] | None = None  # citation sources for cross-meeting queries
 
 
 class MeetingSummaryResponse(BaseModel):
@@ -388,6 +390,8 @@ async def meeting_websocket(websocket: WebSocket) -> None:
                             "Do not infer or invent names, locations, dates, numbers, owners, or deadlines.\n"
                             "If a detail is missing, write 'Not specified in transcript'.\n\n"
                             "Return Markdown with exactly these sections and bullet lists only (no tables):\n"
+                            "## Title\n"
+                            "A concise, specific 3-8 word title that describes what this particular meeting was about (e.g. 'Q3 Budget Review', 'Product Roadmap Planning', 'Onboarding Sync'). Do NOT use generic titles like 'Meeting Overview' or 'Summary'.\n"
                             "## Overview\n"
                             "## Key Takeaways\n"
                             "## Decisions\n"
@@ -532,6 +536,38 @@ async def meeting_websocket(websocket: WebSocket) -> None:
                     logger.error("Notion export error: %s", exc)
                     await safe_send_json(
                         {"type": "error", "message": "Failed to export to Notion"}
+                    )
+                continue
+
+            elif text_data and text_data.startswith("ACTION: SLACK"):
+                # Optional channel override: "ACTION: SLACK #channel-name"
+                channel_arg = text_data.replace("ACTION: SLACK", "").strip() or None
+                try:
+                    summary = await get_meeting_summary(user_id, meeting_id)
+                    if not summary:
+                        await safe_send_json({"type": "error", "message": "No summary available to post to Slack"})
+                        continue
+                    meeting_title = await get_meeting_title(user_id, meeting_id)
+                    loop = asyncio.get_running_loop()
+                    ok = await loop.run_in_executor(
+                        None,
+                        lambda: send_meeting_summary_to_slack(
+                            summary, meeting_title, channel_arg
+                        ),
+                    )
+                    if ok:
+                        target = channel_arg or settings.slack_default_channel or "#general"
+                        await safe_send_json(
+                            {"type": "status", "message": f"Summary posted to Slack {target}"}
+                        )
+                    else:
+                        await safe_send_json(
+                            {"type": "error", "message": "Failed to post summary to Slack. Check SLACK_BOT_TOKEN."}
+                        )
+                except Exception as exc:
+                    logger.error("Slack post error: %s", exc)
+                    await safe_send_json(
+                        {"type": "error", "message": "Failed to post to Slack"}
                     )
                 continue
 
@@ -715,7 +751,10 @@ async def meeting_chat(
     # If special "recent"/"any" mode: delegate to cross_meeting_search pipeline
     if special_any:
         result = await cross_meeting_search(current_user, query)
-        return MeetingChatResponse(response=result.answer)
+        return MeetingChatResponse(
+            response=result.answer,
+            sources=[s.model_dump() for s in result.sources] if result.sources else None,
+        )
 
     transcript = await get_meeting_transcript(current_user, meeting_id)
     if not transcript:
@@ -758,6 +797,32 @@ async def meeting_chat(
                 detail="Failed to export summary to Notion",
             )
         return MeetingChatResponse(response="Done. I pushed this meeting summary to Notion.")
+
+    # Action command: post summary to Slack.
+    if "slack" in query_lower and any(
+        token in query_lower for token in ("push", "send", "post", "share", "export", "upload")
+    ):
+        if not summary:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="No meeting summary available yet. Generate a summary first.",
+            )
+        # Parse optional channel mention, e.g. "post to slack #engineering"
+        channel_match = re.search(r"#[\w-]+", query)
+        channel_arg = channel_match.group(0) if channel_match else None
+        meeting_title = await get_meeting_title(current_user, meeting_id)
+        loop = asyncio.get_running_loop()
+        ok = await loop.run_in_executor(
+            None,
+            lambda: send_meeting_summary_to_slack(summary, meeting_title, channel_arg),
+        )
+        if not ok:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to post summary to Slack. Check SLACK_BOT_TOKEN configuration.",
+            )
+        target = channel_arg or settings.slack_default_channel or "#general"
+        return MeetingChatResponse(response=f"Done. I posted this meeting summary to Slack {target}.")
 
     # Action command: email summary to one or more recipients.
     if any(token in query_lower for token in ("email", "mail", "gmail", "send to")):

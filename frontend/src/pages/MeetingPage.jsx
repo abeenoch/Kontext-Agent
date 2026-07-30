@@ -24,6 +24,7 @@ export default function MeetingPage() {
         sendMeetingChat,
         sendEmail,
         sendNotion,
+        sendSlack,
         setChatMessages,
         setTranscripts,
         setInterimTranscript,
@@ -33,6 +34,7 @@ export default function MeetingPage() {
     // -- Handlers ----------------------------------------------------------
 
     const handleStartRecording = async () => {
+        console.log('[MeetingPage] handleStartRecording called');
         await startMeeting();
     };
 
@@ -48,6 +50,11 @@ export default function MeetingPage() {
     const handleNotion = async () => {
         setStatus({ type: 'loading', message: 'Pushing to Notion...' });
         sendNotion();
+    };
+
+    const handleSlack = async () => {
+        setStatus({ type: 'loading', message: 'Posting to Slack...' });
+        sendSlack();
     };
 
     const handleChatSubmit = async (text, voiceAudio = null) => {
@@ -154,6 +161,7 @@ export default function MeetingPage() {
                                     summary={summary}
                                     onEmail={handleEmail}
                                     onNotion={handleNotion}
+                                    onSlack={handleSlack}
                                     status={status}
                                     isLoading={status?.type === 'loading'}
                                 />

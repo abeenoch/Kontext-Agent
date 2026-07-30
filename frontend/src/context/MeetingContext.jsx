@@ -100,11 +100,17 @@ export function MeetingProvider({ children }) {
     setStatus(null);
 
     // create or reuse meeting id
-    const newMeetingId = crypto.randomUUID().replace(/-/g, '');
+    const newMeetingId = (
+      typeof crypto.randomUUID === 'function'
+        ? crypto.randomUUID()
+        : ([1e7]+-1e3+-4e3+-8e3+-1e11).replace(/[018]/g, c =>
+            (c ^ (Math.random() * 16 >> c / 4)).toString(16))
+    ).replace(/-/g, '');
     setMeetingId(newMeetingId);
 
     const query = new URLSearchParams({ meeting_id: newMeetingId });
     if (wsToken) query.set('token', wsToken);
+    console.log('[MeetingContext] Starting connection to:', `${WS_URL}/meeting/ws?${query.toString()}`);
     connect(`${WS_URL}/meeting/ws?${query.toString()}`);
 
     const started = await startCapture(
@@ -140,10 +146,22 @@ export function MeetingProvider({ children }) {
     sendMessage('ACTION: NOTION');
   }, [meetingId, sendMessage]);
 
+  const sendSlack = useCallback((channel = null) => {
+    if (!meetingId) return;
+    setStatus({ type: 'loading', message: 'Posting to Slack...' });
+    const cmd = channel ? `ACTION: SLACK ${channel}` : 'ACTION: SLACK';
+    sendMessage(cmd);
+  }, [meetingId, sendMessage]);
+
   const sendMeetingChat = useCallback(
     async (text, voiceAudio = null) => {
       const targetMeetingId = meetingId || 'recent';
       const isCrossMeeting = ['any', 'recent', 'latest'].includes(targetMeetingId) || !meetingId;
+
+      // Detect temporal references so we route to cross-meeting search even on a specific meeting
+      const temporalPattern = /\b(yesterday|last\s+\w+|this\s+week|last\s+week|two\s+days|three\s+days|\d+\s+days?\s+ago|monday|tuesday|wednesday|thursday|friday|saturday|sunday|earlier\s+today|this\s+morning|this\s+afternoon)\b/i;
+      const hasTemporalRef = temporalPattern.test(text || '');
+      const useCrossMeeting = isCrossMeeting || hasTemporalRef;
 
       const userMsg = { role: 'user', content: text || '(Voice Message)' };
       setChatMessages((prev) => [...prev, userMsg]);
@@ -152,7 +170,7 @@ export function MeetingProvider({ children }) {
       try {
         let content, sources;
 
-        if (isCrossMeeting) {
+        if (useCrossMeeting) {
           const response = await api.post('/meeting/search', {
             query: text,
             date_hint: null,
@@ -165,7 +183,8 @@ export function MeetingProvider({ children }) {
             voice_audio: voiceAudio,
           });
           content = response.data.response;
-          sources = null;
+          // Capture sources if the backend returns them (e.g. from cross-meeting delegation)
+          sources = response.data.sources?.length ? response.data.sources : null;
         }
 
         const aiMsg = { role: 'assistant', content, sources };
@@ -221,6 +240,7 @@ export function MeetingProvider({ children }) {
         sendMeetingChat,
         sendEmail,
         sendNotion,
+        sendSlack,
         setChatMessages,
         setTranscripts,
         setInterimTranscript,

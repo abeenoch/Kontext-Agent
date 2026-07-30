@@ -20,7 +20,7 @@ services:
       context: .
       dockerfile: Dockerfile
       args:
-        EMBEDDING_MODEL: intfloat/multilingual-e5-small
+        EMBEDDING_MODEL: ${EMBEDDING_MODEL:-intfloat/multilingual-e5-small}
     container_name: kontext-backend
     restart: unless-stopped
     env_file: .env
@@ -31,7 +31,35 @@ services:
       DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/kontext_agent
       CHROMA_DIR: /app/chroma_db
       PRELOAD_EMBEDDINGS: "true"
-      CORS_ORIGINS: http://localhost
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost}
+      # LLM
+      LLM_PROVIDER: ${LLM_PROVIDER:-groq}
+      GROQ_API_KEY: ${GROQ_API_KEY:-}
+      GROQ_MODEL: ${GROQ_MODEL:-openai/gpt-oss-120b}
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://localhost:11434}
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-phi3:mini}
+      # Deepgram
+      DEEPGRAM_API_KEY: ${DEEPGRAM_API_KEY:-}
+      DEEPGRAM_MODEL: ${DEEPGRAM_MODEL:-nova-3}
+      DEEPGRAM_LANGUAGE: ${DEEPGRAM_LANGUAGE:-en}
+      # Security
+      JWT_SECRET: ${JWT_SECRET:-change-me-in-production-min-32-chars}
+      JWT_EXPIRY_HOURS: ${JWT_EXPIRY_HOURS:-24}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:-}
+      # Email
+      SMTP_HOST: ${SMTP_HOST:-smtp.gmail.com}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASS: ${SMTP_PASS:-}
+      # Notion
+      NOTION_TOKEN: ${NOTION_TOKEN:-}
+      NOTION_PAGE_ID: ${NOTION_PAGE_ID:-}
+      # Slack
+      SLACK_BOT_TOKEN: ${SLACK_BOT_TOKEN:-}
+      SLACK_DEFAULT_CHANNEL: ${SLACK_DEFAULT_CHANNEL:-#general}
+      # Misc
+      FRONTEND_URL: ${FRONTEND_URL:-http://localhost}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
     ports:
       - "8000:8000"
     volumes:
@@ -51,8 +79,8 @@ services:
       context: ./frontend
       dockerfile: Dockerfile
       args:
-        VITE_API_BASE_URL: http://localhost:8000
-        VITE_WS_URL: ws://localhost:8000
+        VITE_API_BASE_URL: ${VITE_API_BASE_URL:-http://localhost:8000}
+        VITE_WS_URL: ${VITE_WS_URL:-ws://localhost:8000}
     container_name: kontext-frontend
     restart: unless-stopped
     ports:
