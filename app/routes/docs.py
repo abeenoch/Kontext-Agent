@@ -19,6 +19,13 @@ from app.services.audio import process_browser_audio
 from app.services.chat_memory import add_message, get_recent_history
 from app.services.doc_jobs import process_doc_job, get_job
 from app.services.chat_memory import create_doc_job, update_doc_job
+from app.utils.redaction import redact_pii
+from app.prompts import (
+    DOCS_SYSTEM_PROMPT,
+    DOCS_NO_RAG_SYSTEM_PROMPT,
+    build_docs_user,
+    build_docs_no_rag_user,
+)
 from app.validators import validate_file_type, validate_file_size
 from app.config import get_settings
 from app.logger import get_logger
@@ -233,12 +240,12 @@ async def docs_chat(
         try:
             docs = await retrieve_docs(user_id, tab_id, query)
             if docs:
-                rag_context = "\n\n".join(docs)
+                rag_context = redact_pii("\n\n".join(docs))
                 sources_used = True
         except TypeError:
             docs = await retrieve_docs(user_id, query)  # type: ignore[arg-type]
             if docs:
-                rag_context = "\n\n".join(docs)
+                rag_context = redact_pii("\n\n".join(docs))
                 sources_used = True
         except Exception as exc:
             logger.warning("RAG retrieval failed: %s", exc)
@@ -252,27 +259,18 @@ async def docs_chat(
         history_text += f"{role_label}: {msg['content']}\n"
 
     if sources_used and rag_context:
-        prompt = (
-            "You are a knowledgeable AI assistant. Answer the user's question "
-            "based on the following document context and conversation history.\n\n"
-            f"Document Context:\n{rag_context}\n\n"
-            f"Conversation History:\n{history_text}\n\n"
-            f"User: {query}\n\nAssistant:"
-        )
+        system_prompt = DOCS_SYSTEM_PROMPT
+        user_prompt = build_docs_user(rag_context, history_text, query)
     else:
-        prompt = (
-            "You are a helpful AI assistant. Answer the user's question "
-            "based on the conversation history.\n\n"
-            f"Conversation History:\n{history_text}\n\n"
-            f"User: {query}\n\nAssistant:"
-        )
+        system_prompt = DOCS_NO_RAG_SYSTEM_PROMPT
+        user_prompt = build_docs_no_rag_user(history_text, query)
 
     try:
-        response = await query_llm(prompt)
+        response = await query_llm(user_prompt, system_prompt=system_prompt)
 
         # Persist to chat memory
-        await add_message(user_id, "user", query)
-        await add_message(user_id, "assistant", response)
+        await add_message(user_id, "user", query, tab_id=tab_id)
+        await add_message(user_id, "assistant", response, tab_id=tab_id)
 
         return DocsChatResponse(response=response, sources_used=sources_used)
 

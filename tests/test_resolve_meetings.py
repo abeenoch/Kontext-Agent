@@ -107,7 +107,7 @@ async def test_meeting_list_truncated_to_50():
 
     captured_prompts = []
 
-    async def mock_llm(prompt, temperature=None):
+    async def mock_llm(prompt, temperature=None, **kwargs):
         captured_prompts.append(prompt)
         return llm_response
 

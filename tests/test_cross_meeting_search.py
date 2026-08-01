@@ -53,8 +53,13 @@ async def test_unfiltered_search_with_results():
             new=AsyncMock(return_value=(None, None)),
         ),
         patch(
-            "app.services.meeting_search.query_meetings",
-            new=AsyncMock(return_value=["chunk1", "chunk2"]),
+            "app.services.meeting_search.query_meetings_detailed",
+            new=AsyncMock(
+                return_value=[
+                    {"text": "chunk1", "meeting_id": "mid-1"},
+                    {"text": "chunk2", "meeting_id": "mid-2"},
+                ]
+            ),
         ),
         patch(
             "app.services.meeting_search.query_llm",
@@ -76,8 +81,13 @@ async def test_llm_failure_fallback():
             new=AsyncMock(return_value=(None, None)),
         ),
         patch(
-            "app.services.meeting_search.query_meetings",
-            new=AsyncMock(return_value=["chunk1", "chunk2"]),
+            "app.services.meeting_search.query_meetings_detailed",
+            new=AsyncMock(
+                return_value=[
+                    {"text": "chunk1", "meeting_id": "mid-1"},
+                    {"text": "chunk2", "meeting_id": "mid-2"},
+                ]
+            ),
         ),
         patch(
             "app.services.meeting_search.query_llm",

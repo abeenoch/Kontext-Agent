@@ -8,6 +8,7 @@ from app.services.deepgram import DeepgramSTTHandler, TranscriptResult, get_tts_
 from app.services.audio import process_browser_audio
 from app.services.llm_agent import query_llm
 from app.services.chat_memory import add_message, get_recent_history
+from app.prompts import VOICE_CHAT_SYSTEM_PROMPT, build_voice_chat_user
 from app.config import get_settings
 from app.logger import get_logger
 
@@ -61,16 +62,12 @@ async def voice_chat_websocket(websocket: WebSocket) -> None:
                 role_label = "User" if msg["role"] == "user" else "Assistant"
                 history_text += f"{role_label}: {msg['content']}\n"
 
-            prompt = (
-                "You are a helpful, conversational AI assistant. "
-                "Respond naturally and concisely. "
-                "Keep your responses brief but informative.\n\n"
-                f"Conversation history:\n{history_text}\n\n"
-                f"User: {result.text}\n\nAssistant:"
-            )
+            user_prompt = build_voice_chat_user(history_text, result.text)
 
             try:
-                llm_response = await query_llm(prompt)
+                llm_response = await query_llm(
+                    user_prompt, system_prompt=VOICE_CHAT_SYSTEM_PROMPT
+                )
 
                 # Save to memory
                 conversation_history.append({"role": "user", "content": result.text})

@@ -7,7 +7,14 @@ from pydantic import BaseModel
 from app.logger import get_logger
 from app.services.chat_memory import list_meetings
 from app.services.llm_agent import query_llm
-from app.services.vector_store import query_meetings
+from app.services.vector_store import query_meetings_detailed
+from app.prompts import (
+    TEMPORAL_RESOLVER_SYSTEM_PROMPT,
+    CROSS_MEETING_SYSTEM_PROMPT,
+    build_temporal_resolver_user,
+    build_cross_meeting_user,
+)
+from app.utils.redaction import redact_pii
 
 logger = get_logger(__name__)
 
@@ -66,24 +73,11 @@ async def resolve_meetings(
 
         today_str = reference_dt.astimezone(timezone.utc).isoformat()
 
-        prompt = f"""Today's UTC datetime: {today_str}
-
-The user has the following meetings (most recent first):
-{meeting_list_str}
-
-User query: {query}
-
-Does this query contain a temporal reference (e.g. "yesterday", "last Tuesday", "this week", "last month")?
-
-Return ONLY valid JSON with no explanation, no markdown, no code fences:
-{{"has_temporal": bool, "start_iso": str|null, "end_iso": str|null, "description": str|null}}
-
-- "has_temporal": true if the query references a specific time period, false otherwise
-- "start_iso": ISO datetime string for the start of the resolved window (null if no temporal ref)
-- "end_iso": ISO datetime string for the end of the resolved window (null if no temporal ref)
-- "description": human-readable description of the time window (null if no temporal ref)"""
-
-        raw = await query_llm(prompt, temperature=0)
+        raw = await query_llm(
+            build_temporal_resolver_user(today_str, meeting_list_str, query),
+            temperature=0,
+            system_prompt=TEMPORAL_RESOLVER_SYSTEM_PROMPT,
+        )
 
         # Strip markdown code fences if present
         cleaned = raw.strip()
@@ -91,7 +85,20 @@ Return ONLY valid JSON with no explanation, no markdown, no code fences:
         cleaned = re.sub(r"\s*```$", "", cleaned)
         cleaned = cleaned.strip()
 
-        parsed = json.loads(cleaned)
+        # Be resilient: if the model wrapped the JSON in prose, extract the
+        # substring between the first "{" and the last "}".
+        start = cleaned.find("{")
+        end = cleaned.rfind("}")
+        parsed = None
+        if start != -1 and end != -1 and end > start:
+            try:
+                parsed = json.loads(cleaned[start : end + 1])
+            except (ValueError, TypeError):
+                parsed = None
+
+        if not isinstance(parsed, dict):
+            logger.warning("resolve_meetings: could not parse LLM JSON output")
+            return (None, None)
 
         if not parsed.get("has_temporal"):
             return (None, None)
@@ -159,20 +166,23 @@ async def cross_meeting_search(
             temporal_range=temporal_range,
         )
     elif meeting_ids is None:
-        chunks = await query_meetings(user_id, query, n_results=10)
+        chunk_items = await query_meetings_detailed(user_id, query, n_results=10)
     else:
         # Non-empty list: query per meeting and deduplicate
         seen: set[str] = set()
-        chunks: list[str] = []
+        chunk_items: list[dict] = []
         for mid in meeting_ids:
-            for chunk in await query_meetings(user_id, query, meeting_id=mid, n_results=10):
-                if chunk not in seen:
-                    seen.add(chunk)
-                    chunks.append(chunk)
-        chunks = chunks[:10]
+            for item in await query_meetings_detailed(
+                user_id, query, meeting_id=mid, n_results=10
+            ):
+                text = item.get("text", "")
+                if text not in seen:
+                    seen.add(text)
+                    chunk_items.append(item)
+        chunk_items = chunk_items[:10]
 
     # 5. No chunks found
-    if not chunks:
+    if not chunk_items:
         return CrossMeetingSearchResult(
             answer="I couldn't find relevant content in your meeting history for that query.",
             sources=[],
@@ -194,34 +204,60 @@ async def cross_meeting_search(
         header_lines.append(f"- {m.get('title', '')} (started: {m.get('started_at', 'unknown')})")
     header = "\n".join(header_lines)
 
-    # 9. Build numbered chunks string
-    numbered_chunks = "\n\n".join(f"{i}. {chunk}" for i, chunk in enumerate(chunks, start=1))
+    # 9. Build numbered chunks string with meeting attribution
+    def _chunk_label(item: dict) -> str:
+        mid = item.get("meeting_id")
+        if mid and mid in meeting_lookup:
+            title = meeting_lookup[mid].get("title")
+            if title:
+                return title
+        return mid or "unknown meeting"
 
-    # 10. Build prompt
-    prompt = (
-        "You are an AI meeting assistant. Answer the user's question using the meeting content below.\n"
-        "Always cite which meeting the information came from when possible.\n\n"
-        f"Meetings searched:\n{header}\n\n"
-        f"Relevant content:\n{numbered_chunks}\n\n"
-        f"User question: {query}\n\n"
-        "Provide a clear, helpful answer. If you reference specific information, mention which meeting it came from."
+    numbered_chunks = redact_pii(
+        "\n\n".join(
+            f"[{i}] ({_chunk_label(item)}) {item['text']}"
+            for i, item in enumerate(chunk_items, start=1)
+        )
     )
 
-    # 11. Query LLM with fallback
+    # 10. Query LLM with fallback
     try:
-        answer = await query_llm(prompt)
+        answer = await query_llm(
+            build_cross_meeting_user(header, numbered_chunks, query),
+            system_prompt=CROSS_MEETING_SYSTEM_PROMPT,
+        )
     except Exception:
-        answer = "Note: AI synthesis unavailable.\n\n" + "\n\n---\n\n".join(chunks)
+        answer = "Note: AI synthesis unavailable.\n\n" + "\n\n---\n\n".join(
+            item["text"] for item in chunk_items
+        )
 
-    # 12. Build sources
+    # 11. Build honest sources: only the meetings actually cited via [N].
+    cited_ids: set[str] = set()
+    for idx in re.findall(r"\[(\d+)\]", answer):
+        try:
+            i = int(idx)
+        except ValueError:
+            continue
+        if 1 <= i <= len(chunk_items):
+            mid = chunk_items[i - 1].get("meeting_id")
+            if mid:
+                cited_ids.add(mid)
+
+    if not cited_ids:
+        # Fallback: the meetings that actually contributed chunks.
+        for item in chunk_items:
+            if item.get("meeting_id"):
+                cited_ids.add(item["meeting_id"])
+
     sources = [
         SourceMeeting(
             meeting_id=m["meeting_id"],
             title=m.get("title", ""),
             started_at=m.get("started_at"),
         )
-        for m in searched_meetings
+        for m in meetings
+        if m["meeting_id"] in cited_ids
     ]
 
-    # 13. Return result
+    # 12. Return result
     return CrossMeetingSearchResult(answer=answer, sources=sources, temporal_range=temporal_range)

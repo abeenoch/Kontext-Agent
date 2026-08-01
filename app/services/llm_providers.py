@@ -65,9 +65,10 @@ class LLMHTTPError(LLMProviderError):
 class BaseLLMProvider:
     name = "base"
 
-    def __init__(self, model: str, timeout: float):
+    def __init__(self, model: str, timeout: float, max_tokens: int | None = None):
         self.model = model
         self.timeout = timeout
+        self.max_tokens = max_tokens
         self._client: httpx.AsyncClient | None = None
 
     def _client_options(self) -> dict:
@@ -80,13 +81,25 @@ class BaseLLMProvider:
     def _headers(self) -> dict[str, str]:
         return {"Content-Type": "application/json"}
 
-    def _payload(self, prompt: str, temperature: float) -> dict:
-        return {
+    def _build_messages(self, prompt: str, system_prompt: str | None = None) -> list[dict]:
+        messages = []
+        if system_prompt:
+            messages.append({"role": "system", "content": system_prompt})
+        messages.append({"role": "user", "content": prompt})
+        return messages
+
+    def _payload(
+        self, prompt: str, temperature: float, system_prompt: str | None = None
+    ) -> dict:
+        payload = {
             "model": self.model,
-            "messages": [{"role": "user", "content": prompt}],
+            "messages": self._build_messages(prompt, system_prompt),
             "temperature": temperature,
             "stream": True,
         }
+        if self.max_tokens is not None:
+            payload["max_tokens"] = self.max_tokens
+        return payload
 
     def _cost(self, prompt_tokens: int | None, completion_tokens: int | None) -> float:
         return 0.0
@@ -114,7 +127,9 @@ class BaseLLMProvider:
     async def reset_client(self) -> None:
         await self.close()
 
-    async def generate(self, prompt: str, temperature: float) -> LLMCallResult:
+    async def generate(
+        self, prompt: str, temperature: float, system_prompt: str | None = None
+    ) -> LLMCallResult:
         raise NotImplementedError
 
 
@@ -122,7 +137,11 @@ class GroqProvider(BaseLLMProvider):
     name = "groq"
 
     def __init__(self) -> None:
-        super().__init__(settings.groq_model, settings.llm_timeout)
+        super().__init__(
+            settings.groq_model,
+            settings.llm_timeout,
+            getattr(settings, "llm_max_tokens", None),
+        )
 
     def _headers(self) -> dict[str, str]:
         if not settings.groq_api_key:
@@ -132,8 +151,10 @@ class GroqProvider(BaseLLMProvider):
             "Content-Type": "application/json",
         }
 
-    def _payload(self, prompt: str, temperature: float) -> dict:
-        payload = super()._payload(prompt, temperature)
+    def _payload(
+        self, prompt: str, temperature: float, system_prompt: str | None = None
+    ) -> dict:
+        payload = super()._payload(prompt, temperature, system_prompt=system_prompt)
         payload["stream_options"] = {"include_usage": True}
         return payload
 
@@ -145,7 +166,9 @@ class GroqProvider(BaseLLMProvider):
             + (completion_tokens * settings.groq_output_cost_per_1k_tokens / 1000.0)
         )
 
-    async def generate(self, prompt: str, temperature: float) -> LLMCallResult:
+    async def generate(
+        self, prompt: str, temperature: float, system_prompt: str | None = None
+    ) -> LLMCallResult:
         client = await self._get_client()
         started = time.perf_counter()
         first_token_at: float | None = None
@@ -157,7 +180,7 @@ class GroqProvider(BaseLLMProvider):
                 "POST",
                 settings.groq_url,
                 headers=self._headers(),
-                json=self._payload(prompt, temperature),
+                json=self._payload(prompt, temperature, system_prompt=system_prompt),
             ) as response:
                 if response.status_code >= 400:
                     body = await response.aread()
@@ -230,7 +253,11 @@ class OllamaProvider(BaseLLMProvider):
     name = "ollama"
 
     def __init__(self) -> None:
-        super().__init__(settings.ollama_model, settings.ollama_timeout)
+        super().__init__(
+            settings.ollama_model,
+            settings.ollama_timeout,
+            getattr(settings, "llm_max_tokens", None),
+        )
 
     def _client_options(self) -> dict:
         options = super()._client_options()
@@ -245,19 +272,26 @@ class OllamaProvider(BaseLLMProvider):
             + (completion_tokens * settings.ollama_output_cost_per_1k_tokens / 1000.0)
         )
 
-    def _payload(self, prompt: str, temperature: float) -> dict:
+    def _payload(
+        self, prompt: str, temperature: float, system_prompt: str | None = None
+    ) -> dict:
+        options = {"temperature": temperature}
+        if self.max_tokens is not None:
+            options["num_predict"] = self.max_tokens
         payload = {
             "model": self.model,
-            "messages": [{"role": "user", "content": prompt}],
+            "messages": self._build_messages(prompt, system_prompt),
             "stream": True,
-            "options": {"temperature": temperature},
+            "options": options,
         }
         keep_alive = settings.ollama_keep_alive.strip()
         if keep_alive:
             payload["keep_alive"] = keep_alive
         return payload
 
-    async def generate(self, prompt: str, temperature: float) -> LLMCallResult:
+    async def generate(
+        self, prompt: str, temperature: float, system_prompt: str | None = None
+    ) -> LLMCallResult:
         client = await self._get_client()
         started = time.perf_counter()
         first_token_at: float | None = None
@@ -270,7 +304,7 @@ class OllamaProvider(BaseLLMProvider):
             async with client.stream(
                 "POST",
                 url,
-                json=self._payload(prompt, temperature),
+                json=self._payload(prompt, temperature, system_prompt=system_prompt),
             ) as response:
                 if response.status_code >= 400:
                     body = await response.aread()

@@ -11,6 +11,12 @@ from pydantic import BaseModel
 from app.services.deepgram import DeepgramSTTHandler, TranscriptResult
 from app.services.audio import process_browser_audio
 from app.services.llm_agent import query_llm
+from app.prompts import (
+    FINAL_SUMMARY_SYSTEM_PROMPT,
+    MEETING_CHAT_SYSTEM_PROMPT,
+    build_final_summary_user,
+    build_meeting_chat_user,
+)
 from app.services.summarizer import (
     summarize_periodically,
     compute_initial_periodic_delay_seconds,
@@ -384,29 +390,11 @@ async def meeting_websocket(websocket: WebSocket) -> None:
                     full_transcript = await get_meeting_transcript(user_id, meeting_id)
 
                     if len(full_transcript.strip()) > 100:
-                        summary_prompt = (
-                            "You are an expert meeting summarizer. Create a comprehensive final summary.\n"
-                            "Use only facts that are explicitly present in the transcript.\n"
-                            "Do not infer or invent names, locations, dates, numbers, owners, or deadlines.\n"
-                            "If a detail is missing, write 'Not specified in transcript'.\n\n"
-                            "Return Markdown with exactly these sections and bullet lists only (no tables):\n"
-                            "## Title\n"
-                            "A concise, specific 3-8 word title that describes what this particular meeting was about (e.g. 'Q3 Budget Review', 'Product Roadmap Planning', 'Onboarding Sync'). Do NOT use generic titles like 'Meeting Overview' or 'Summary'.\n"
-                            "## Overview\n"
-                            "## Key Takeaways\n"
-                            "## Decisions\n"
-                            "## Action Items\n"
-                            "- include owner and deadline when available\n"
-                            "## Deadlines\n"
-                            "## Risks / Blockers\n"
-                            "## Participants\n\n"
-                            f"Transcript:\n{redact_pii(full_transcript)}\n\n"
-                            "Be explicit and concrete."
-                        )
                         final_summary = await query_llm(
-                            summary_prompt,
+                            build_final_summary_user(redact_pii(full_transcript)),
                             max_retries=2,
                             temperature=0.2,
+                            system_prompt=FINAL_SUMMARY_SYSTEM_PROMPT,
                         )
 
                         await save_meeting_summary(user_id, meeting_id, final_summary)
@@ -888,15 +876,11 @@ async def meeting_chat(
     safe_context = redact_pii(context_joined)
     sanitized_query = redact_pii(query)
 
-    prompt = (
-        "You are an AI meeting assistant. Answer the user's question using the meeting context below.\n\n"
-        f"{safe_context}\n\n"
-        f"User question: {sanitized_query}\n\n"
-        "Provide a clear, helpful answer grounded in the provided context."
-    )
-
     try:
-        response_text = await query_llm(prompt)
+        response_text = await query_llm(
+            build_meeting_chat_user(safe_context, sanitized_query),
+            system_prompt=MEETING_CHAT_SYSTEM_PROMPT,
+        )
         return MeetingChatResponse(response=response_text)
     except httpx.HTTPStatusError as exc:
         if exc.response.status_code == 503:

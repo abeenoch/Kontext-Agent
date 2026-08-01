@@ -6,6 +6,13 @@ from app.services.llm_agent import query_llm
 from app.services.rag_pipeline import retrieve_docs, list_user_docs
 from app.services.chat_memory import add_message, get_recent_history, clear_history
 from app.services.audio import process_browser_audio
+from app.utils.redaction import redact_pii
+from app.prompts import (
+    CHAT_SYSTEM_PROMPT,
+    CHAT_NO_CONTEXT_SYSTEM_PROMPT,
+    build_chat_user,
+    build_doc_hint,
+)
 from app.config import get_settings
 from app.logger import get_logger
 import httpx
@@ -74,13 +81,13 @@ async def chat_query(
     try:
         docs = await retrieve_docs(user_id, request.tab_id, query)
         if docs:
-            rag_context = "\n\n".join(docs)
+            rag_context = redact_pii("\n\n".join(docs))
             sources_used = True
     except TypeError:
         # Backward compatibility for test stubs that accept (user_id, query)
         docs = await retrieve_docs(user_id, query)  # type: ignore[arg-type]
         if docs:
-            rag_context = "\n\n".join(docs)
+            rag_context = redact_pii("\n\n".join(docs))
             sources_used = True
     except Exception as exc:
         logger.warning("RAG retrieval error: %s", exc)
@@ -96,38 +103,18 @@ async def chat_query(
         role_label = "User" if msg["role"] == "user" else "Assistant"
         history_text += f"{role_label}: {msg['content']}\n"
 
-    # Build prompt
+    # Build prompt (system + user content via centralized prompt builders)
     if sources_used:
-        prompt = (
-            "You are a helpful AI assistant. Answer the user's question "
-            "using the following context and conversation history.\n\n"
-            f"Context:\n{rag_context}\n\n"
-            f"History:\n{history_text}\n\n"
-            f"User: {query}\n\nAssistant:"
-        )
+        system_prompt = CHAT_SYSTEM_PROMPT
+        user_prompt = build_chat_user(rag_context, history_text, query)
     else:
-        doc_hint = ""
-        if doc_names:
-            latest_name = doc_names[0]
-            others = doc_names[1:5]
-            extra = f" Other uploads: {', '.join(others)}." if others else ""
-            doc_hint = (
-                f"The most recently uploaded document is '{latest_name}'.{extra} "
-                "You do NOT have their full contents in this message. "
-                "If the user's intent is about documents, assume they likely mean the most recent one unless they specify otherwise. "
-                "State that you're using the latest document by default, and invite them to name a different file if needed. "
-                "Do not invent details not present in retrieved context.\n\n"
-            )
-
-        prompt = (
-            "You are a helpful AI assistant.\n\n"
-            f"{doc_hint}"
-            f"History:\n{history_text}\n\n"
-            f"User: {query}\n\nAssistant:"
+        system_prompt = CHAT_NO_CONTEXT_SYSTEM_PROMPT
+        user_prompt = build_chat_user(
+            "", history_text, query, doc_hint=build_doc_hint(doc_names)
         )
 
     try:
-        response = await query_llm(prompt)
+        response = await query_llm(user_prompt, system_prompt=system_prompt)
 
         await add_message(user_id, "user", query, tab_id=request.tab_id)
         await add_message(user_id, "assistant", response, tab_id=request.tab_id)

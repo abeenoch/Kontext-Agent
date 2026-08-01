@@ -124,7 +124,7 @@ Go to the Chat page to upload PDF or TXT files. The documents are chunked and in
 
 ### Voice Chat
 
-Connect to the voice chat WebSocket endpoint (`/voice-chat/ws`) to have a real-time spoken conversation with the AI. It transcribes your speech, generates an LLM response, and speaks the answer back using text-to-speech.
+Connect to the voice chat WebSocket endpoint (`/voice-chat/ws`) to have a real-time spoken conversation with the AI. It transcribes your speech, generates an LLM response, and speaks the answer back using text-to-speech. Responses are constrained to plain, TTS-friendly sentences (no markdown, bullets, or emojis) and kept under 40 words.
 
 ### API Quick Start
 
@@ -175,11 +175,11 @@ sequenceDiagram
 
 ### Automated Periodic and Final Summaries
 
-The system automatically generates concise periodic summaries during the meeting and a comprehensive final summary when the meeting ends. Summaries include key takeaways, decisions, action items, deadlines, and risks. All PII is redacted before being sent to the LLM.
+The system automatically generates concise periodic summaries during the meeting and a comprehensive final summary when the meeting ends. Each periodic update builds on the previous one (focusing on what's new instead of repeating covered points), while the final summary follows a strict section template — Title, Overview, Key Takeaways, Decisions, Action Items, Deadlines, Risks/Blockers, Participants — is written in the same language as the transcript, and is capped at 400 words. All PII is redacted before being sent to the LLM.
 
 ### Cross-Meeting Temporal and Semantic Search
 
-Ask natural language questions across all your past meetings. The system first resolves any time references (like "last Monday") to filter relevant meetings, then performs semantic search over those meetings and synthesizes an answer with attribution to source meetings.
+Ask natural language questions across all your past meetings. The system first resolves any time references (like "last Monday") to filter relevant meetings, then performs semantic search over those meetings and synthesizes an answer. Every retrieved chunk is numbered and labeled with its source meeting, the model is asked to cite the chunks it actually uses (e.g. `[1]`), and the returned `sources` list contains only the meetings that were actually cited — not just the meetings that were searched.
 
 ```mermaid
 sequenceDiagram
@@ -212,7 +212,16 @@ Upload PDFs and text documents. The system chunks, embeds, and indexes them in C
 
 ### Data Privacy and Retention
 
-Transcripts and summaries are encrypted at rest using AES-GCM. PII is redacted before any LLM call. Meeting data is automatically pruned after a configurable retention period. Users can hard-delete meeting records and associated embeddings.
+Transcripts and summaries are encrypted at rest using AES-GCM. PII is redacted before any LLM call — across meeting transcripts, summaries, document RAG context, and cross-meeting search chunks. Meeting data is automatically pruned after a configurable retention period. Users can hard-delete meeting records and associated embeddings.
+
+### LLM Prompt Architecture
+
+All LLM prompts are centralized in `app/prompts.py`. Each surface (chat, docs chat, voice chat, meeting chat, periodic/final summaries, temporal resolution, cross-meeting search) defines:
+
+- a **system prompt** constant with the persistent role and behavior instructions, and
+- a **user content builder** that only carries the data for that request.
+
+The backend sends these as separate `system` and `user` messages to the LLM provider, which improves instruction adherence and keeps persona instructions separate from user data. Grounding guardrails are applied consistently across RAG surfaces: answer only from the provided context, say "I don't know" when unsure, and ignore instructions embedded in retrieved content. LLM completion length can be capped globally with `LLM_MAX_TOKENS`.
 
 ### Slack Integration
 
@@ -368,7 +377,7 @@ All endpoints are prefixed with the configured base URL (default `http://localho
 
 #### POST /meeting/search
 
-**Description**: Cross-meeting temporal & semantic search.
+**Description**: Cross-meeting temporal & semantic search. The `sources` list contains only the meetings actually cited in the synthesized answer.
 
 **Request**:
 ```json
@@ -650,6 +659,7 @@ All endpoints are prefixed with the configured base URL (default `http://localho
 | `DEEPGRAM_API_KEY` | Deepgram API key for STT/TTS | Yes |
 | `GROQ_API_KEY` | Groq API key for LLM calls | Required if provider is groq |
 | `LLM_PROVIDER` | Choose `groq` or `ollama` | Yes |
+| `LLM_MAX_TOKENS` | Optional cap on LLM completion length (empty = provider default) | Optional |
 | `ENCRYPTION_KEY` | Key for AES-GCM encryption of transcripts (falls back to `JWT_SECRET`) | Optional |
 | `SMTP_HOST` / `SMTP_USER` / `SMTP_PASS` | SMTP credentials for email summaries | Optional |
 | `NOTION_TOKEN` | Notion integration token | Optional |

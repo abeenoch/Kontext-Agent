@@ -27,6 +27,9 @@ class Settings(BaseSettings):
     llm_provider: str = os.getenv("LLM_PROVIDER", "groq").lower()
     llm_temperature: float = float(os.getenv("LLM_TEMPERATURE", "0.7"))
     llm_timeout: float = float(os.getenv("LLM_TIMEOUT", "30.0"))
+    llm_max_tokens: int | None = (
+        int(os.getenv("LLM_MAX_TOKENS")) if os.getenv("LLM_MAX_TOKENS") else None
+    )
     groq_input_cost_per_1k_tokens: float = float(
         os.getenv("GROQ_INPUT_COST_PER_1K_TOKENS", "0.0")
     )

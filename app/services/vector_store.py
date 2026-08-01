@@ -276,7 +276,36 @@ async def query_meetings(
     before_ts: Optional[float] = None,
     n_results: int = 5,
 ) -> List[str]:
-    """Semantic search over meeting transcripts/summaries with optional filters."""
+    """Semantic search over meeting transcripts/summaries with optional filters.
+
+    Convenience wrapper around :func:`query_meetings_detailed` that returns only
+    the chunk texts.
+    """
+    items = await query_meetings_detailed(
+        user_id,
+        query,
+        meeting_id=meeting_id,
+        after_ts=after_ts,
+        before_ts=before_ts,
+        n_results=n_results,
+    )
+    return [item["text"] for item in items]
+
+
+async def query_meetings_detailed(
+    user_id: str,
+    query: str,
+    *,
+    meeting_id: Optional[str] = None,
+    after_ts: Optional[float] = None,
+    before_ts: Optional[float] = None,
+    n_results: int = 5,
+) -> List[dict]:
+    """Semantic search over meeting transcripts/summaries with optional filters.
+
+    Returns a list of dicts with keys ``text`` and ``meeting_id`` so callers can
+    attribute each chunk to its source meeting.
+    """
     if not query or not query.strip():
         return []
 
@@ -304,7 +333,17 @@ async def query_meetings(
             n_results=min(n_results, max(1, collection.count())),
             where=where or None,
         )
-        return results.get("documents", [[]])[0]
+        docs = results.get("documents", [[]])[0] or []
+        metas = results.get("metadatas", [[]])[0] or []
+        items: List[dict] = []
+        for doc, meta in zip(docs, metas):
+            items.append(
+                {
+                    "text": doc,
+                    "meeting_id": (meta or {}).get("meeting_id"),
+                }
+            )
+        return items
     except Exception as exc:
         logger.warning("Meeting query failed: %s", exc)
         return []

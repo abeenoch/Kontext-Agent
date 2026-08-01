@@ -8,7 +8,7 @@ def test_docs_upload_chat_clear(client, auth_headers, monkeypatch):
     async def fake_retrieve_docs(_user_id, _query):
         return ["knowledge chunk"]
 
-    async def fake_query_llm(_prompt, max_retries=3):
+    async def fake_query_llm(_prompt, *args, **kwargs):
         return "mocked docs response"
 
     monkeypatch.setattr(docs_routes, "ingest_file", fake_ingest_file)

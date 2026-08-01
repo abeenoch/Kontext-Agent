@@ -5,7 +5,7 @@ def test_chat_query_and_clear_history(client, auth_headers, monkeypatch):
     async def fake_retrieve_docs(_user_id, _query):
         return ["doc context"]
 
-    async def fake_query_llm(_prompt, max_retries=3):
+    async def fake_query_llm(_prompt, *args, **kwargs):
         return "mocked chat response"
 
     monkeypatch.setattr(chat_routes, "retrieve_docs", fake_retrieve_docs)

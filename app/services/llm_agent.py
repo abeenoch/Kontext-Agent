@@ -32,6 +32,7 @@ async def query_llm_detailed(
     prompt: str,
     max_retries: int = 3,
     temperature: float | None = None,
+    system_prompt: str | None = None,
 ):
     """
     Query the configured LLM backend and return the full telemetry payload.
@@ -59,7 +60,9 @@ async def query_llm_detailed(
 
         try:
             with llm_call_in_flight(provider.name, provider.model):
-                result = await provider.generate(prompt, effective_temperature)
+                result = await provider.generate(
+                    prompt, effective_temperature, system_prompt=system_prompt
+                )
 
             if span is not None:
                 span.set_attribute("llm.status", "success")
@@ -194,6 +197,7 @@ async def query_llm(
     prompt: str,
     max_retries: int = 3,
     temperature: float | None = None,
+    system_prompt: str | None = None,
 ) -> str:
     """
     Query the configured LLM backend and return just the text payload.
@@ -202,6 +206,7 @@ async def query_llm(
         prompt,
         max_retries=max_retries,
         temperature=temperature,
+        system_prompt=system_prompt,
     )
     if result is None:
         return ""

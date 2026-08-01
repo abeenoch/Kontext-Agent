@@ -667,6 +667,21 @@ async def save_periodic_summary(user_id: str, meeting_id: str, summary: str) -> 
         await session.commit()
 
 
+async def get_latest_periodic_summary(user_id: str, meeting_id: str) -> str | None:
+    """Retrieve the most recent periodic summary for a meeting, if any."""
+    async with SessionLocal() as session:
+        result = await session.execute(
+            text(
+                "SELECT summary FROM meeting_periodic_summaries "
+                "WHERE user_id = :uid AND meeting_id = :mid "
+                "ORDER BY created_at DESC, id DESC LIMIT 1"
+            ),
+            {"uid": user_id, "mid": meeting_id},
+        )
+        row = result.fetchone()
+        return decrypt_text(row[0], ENCRYPTION_KEY) if row else None
+
+
 async def get_meeting_summary(user_id: str, meeting_id: str) -> str | None:
     """Retrieve the summary for a meeting."""
     async with SessionLocal() as session:
