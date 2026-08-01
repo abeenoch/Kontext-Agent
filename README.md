@@ -654,23 +654,60 @@ All endpoints are prefixed with the configured base URL (default `http://localho
 
 | Variable | Purpose | Required |
 |----------|---------|----------|
+| `APP_ENV` | Set to `development`, `production`, or `test` | No (default: development) |
+| `APP_HOST` | Host to bind the server | No (default: 0.0.0.0) |
+| `APP_PORT` | Port for the server | No (default: 8000) |
 | `DATABASE_URL` | Async SQLAlchemy URI (Postgres or SQLite) | Yes |
+| `CHROMA_DIR` | Directory for ChromaDB persistence | Yes |
 | `JWT_SECRET` | Secret for signing JWTs (min 32 chars in prod) | Yes |
-| `DEEPGRAM_API_KEY` | Deepgram API key for STT/TTS | Yes |
-| `GROQ_API_KEY` | Groq API key for LLM calls | Required if provider is groq |
-| `LLM_PROVIDER` | Choose `groq` or `ollama` | Yes |
-| `LLM_MAX_TOKENS` | Optional cap on LLM completion length (empty = provider default) | Optional |
+| `JWT_EXPIRY_HOURS` | JWT token validity in hours | No (default: 24) |
 | `ENCRYPTION_KEY` | Key for AES-GCM encryption of transcripts (falls back to `JWT_SECRET`) | Optional |
-| `SMTP_HOST` / `SMTP_USER` / `SMTP_PASS` | SMTP credentials for email summaries | Optional |
+| `LLM_PROVIDER` | Choose `groq` or `ollama` | Yes |
+| `GROQ_API_KEY` | Groq API key for LLM calls | Required if provider is groq |
+| `GROQ_MODEL` | Groq model to use (e.g., `openai/gpt-oss-120b`) | No (default: openai/gpt-oss-120b) |
+| `GROQ_INPUT_COST_PER_1K_TOKENS` | Cost tracking for Groq input tokens | Optional (default: 0.0) |
+| `GROQ_OUTPUT_COST_PER_1K_TOKENS` | Cost tracking for Groq output tokens | Optional (default: 0.0) |
+| `OLLAMA_BASE_URL` | Base URL for Ollama server | No (default: http://localhost:11434) |
+| `OLLAMA_MODEL` | Ollama model to use (e.g., `phi3:mini`) | No (default: phi3:mini) |
+| `OLLAMA_TIMEOUT` | Timeout for Ollama requests in seconds | No (default: 30.0) |
+| `OLLAMA_KEEP_ALIVE` | Duration to keep model loaded (e.g., `30m`) | No (default: 30m) |
+| `OLLAMA_INPUT_COST_PER_1K_TOKENS` | Cost tracking for Ollama input tokens | Optional (default: 0.0) |
+| `OLLAMA_OUTPUT_COST_PER_1K_TOKENS` | Cost tracking for Ollama output tokens | Optional (default: 0.0) |
+| `LLM_TEMPERATURE` | Sampling temperature for LLM calls | No (default: 0.7) |
+| `LLM_TIMEOUT` | Timeout for LLM HTTP calls in seconds | No (default: 30.0) |
+| `LLM_MAX_TOKENS` | Optional cap on LLM completion length (empty = provider default) | Optional |
+| `DEEPGRAM_API_KEY` | Deepgram API key for STT/TTS | Yes |
+| `DEEPGRAM_MODEL` | Deepgram STT model | No (default: nova-3) |
+| `DEEPGRAM_LANGUAGE` | Language code for STT | No (default: en) |
+| `DEEPGRAM_TTS_MODEL` | Deepgram TTS voice model | No (default: aura-2-thalia-en) |
+| `DEEPGRAM_INTERIM_RESULTS` | Enable interim results (true/false) | No (default: true) |
+| `DEEPGRAM_PUNCTUATE` | Enable punctuation (true/false) | No (default: true) |
+| `DEEPGRAM_DIARIZE` | Enable speaker diarization (true/false) | No (default: true) |
+| `DEEPGRAM_SMART_FORMAT` | Enable smart formatting (true/false) | No (default: true) |
+| `EMBEDDING_MODEL` | Sentence‑transformers model name | No (default: all-MiniLM-L6-v2) |
+| `CHUNK_SIZE` | Size of text chunks for RAG ingestion | No (default: 800) |
+| `CHUNK_OVERLAP` | Overlap between chunks | No (default: 100) |
+| `WEBSOCKET_TIMEOUT` | WebSocket idle timeout in seconds | No (default: 300.0) |
+| `PRELOAD_EMBEDDINGS` | Preload embedding model at startup (true/false) | No (default: true) |
+| `MEETING_RETENTION_DAYS` | Days after which meeting data is pruned | No (default: 90) |
+| `PERIODIC_SUMMARY_LOOKBACK_MINUTES` | Lookback window for periodic summaries | No (default: 10) |
+| `SMTP_HOST` | SMTP host for email summaries | Optional |
+| `SMTP_PORT` | SMTP port | Optional (default: 587) |
+| `SMTP_USER` | SMTP username | Optional |
+| `SMTP_PASS` | SMTP password | Optional |
 | `NOTION_TOKEN` | Notion integration token | Optional |
 | `NOTION_PAGE_ID` | Notion parent page ID to create summary pages under | Optional |
 | `SLACK_BOT_TOKEN` | Slack Bot User OAuth Token (`xoxb-...`) | Optional |
-| `SLACK_DEFAULT_CHANNEL` | Default Slack channel to post summaries to (e.g. `#general`) | Optional |
+| `SLACK_DEFAULT_CHANNEL` | Default Slack channel for posting summaries (e.g., `#general`) | Optional |
 | `CORS_ORIGINS` | Comma-separated allowed origins | Yes (production) |
 | `FRONTEND_URL` | Frontend URL for password reset link | Optional |
-| `CHROMA_DIR` | Directory for ChromaDB persistence | Yes |
-| `EMBEDDING_MODEL` | Sentence‑transformers model name | Optional |
-| `APP_ENV` | `development`, `production`, or `test` | Optional |
+| `LOG_LEVEL` | Logging level (DEBUG, INFO, WARNING, etc.) | No (default: INFO) |
+| `RATE_LIMIT_REQUESTS` | Max auth requests per period | No (default: 100) |
+| `RATE_LIMIT_PERIOD` | Rate limit window in seconds | No (default: 60) |
+| `OTEL_SERVICE_NAME` | OpenTelemetry service name | No (default: kontext-agent) |
+| `OTEL_TRACES_ENABLED` | Enable OpenTelemetry tracing (true/false) | No (default: true) |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | OTLP endpoint for traces | Optional |
+| `OTEL_EXPORTER_OTLP_HEADERS` | Additional OTLP exporter headers | Optional |
 
 See `.env.example` for the full list and default values.
 
