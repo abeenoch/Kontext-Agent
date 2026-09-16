@@ -39,3 +39,10 @@ coverage.xml
 htmlcov/
 # Local docs/changelogs (not needed to run the code)
 docs/
+
+# TLS certificates (kontext.key is a private key — never commit)
+certs/
+*.key
+*.crt
+*.pem
+
