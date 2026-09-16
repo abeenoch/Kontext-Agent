@@ -4,7 +4,8 @@ import { useWebSocket } from '../hooks/useWebSocket';
 import api from '../services/api';
 import { useAuth } from './AuthContext';
 
-const WS_URL = import.meta.env.VITE_WS_URL || 'ws://localhost:8000';
+// Same-origin API/WS defaults (works behind the vite preview HTTPS proxy).
+const WS_URL = import.meta.env.VITE_WS_URL || `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.host}`;
 
 const MeetingContext = createContext(null);
 
