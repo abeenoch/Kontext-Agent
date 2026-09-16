@@ -179,7 +179,7 @@ export default function ChatPage() {
                             title="Clear chat history"
                         >
                             <Trash2 size={14} />
-                            <span className="hidden xs:inline">Clear chat</span>
+                            <span className="hidden sm:inline">Clear chat</span>
                         </button>
                         {uploadStatus && uploadStatus.type === 'error' && (
                             <div className="flex items-center gap-2 text-xs text-rose-700 bg-rose-50 border border-rose-200 px-3 py-1.5 rounded-lg">

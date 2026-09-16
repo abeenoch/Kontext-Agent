@@ -88,7 +88,7 @@ export default function MeetingPage() {
 
                     <div className="flex items-center gap-2 text-slate-500 text-xs md:text-sm">
                         <div className={`w-2.5 h-2.5 rounded-full ${isConnected ? 'bg-green-500' : 'bg-slate-600'}`} />
-                        <span className="hidden xs:inline">{isConnected ? 'Connected' : 'Disconnected'}</span>
+                        <span className="hidden sm:inline">{isConnected ? 'Connected' : 'Disconnected'}</span>
                         {meetingId && <span className="text-xs opacity-50 ml-1 hidden sm:inline">ID: {meetingId.slice(0, 8)}</span>}
                     </div>
                 </div>
@@ -134,7 +134,8 @@ export default function MeetingPage() {
                             `}
                         >
                             <FileText size={16} />
-                            <span className="hidden xs:inline">Summary</span> & Actions
+                            <span className="hidden sm:inline">Summary &amp; Actions</span>
+                            <span className="sm:hidden">Summary</span>
                             {activeTab === 'summary' && (
                                 <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-amber-500" />
                             )}
@@ -146,7 +147,8 @@ export default function MeetingPage() {
                             `}
                         >
                             <MessageSquare size={16} />
-                            <span className="hidden xs:inline">Chat</span> with Transcript
+                            <span className="hidden sm:inline">Chat with Transcript</span>
+                            <span className="sm:hidden">Chat</span>
                             {activeTab === 'chat' && (
                                 <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-amber-500" />
                             )}
