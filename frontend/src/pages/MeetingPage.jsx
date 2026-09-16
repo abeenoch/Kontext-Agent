@@ -63,33 +63,33 @@ export default function MeetingPage() {
 
     // -- Render ------------------------------------------------------------
     return (
-        <div className="h-[calc(100vh-64px)] flex flex-col p-4 gap-4 max-w-7xl mx-auto">
+        <div className="h-[calc(100vh-64px)] flex flex-col p-3 md:p-4 gap-4 w-full max-w-7xl mx-auto">
 
             {/* Top Bar Controls */}
-            <div className="flex items-center justify-between bg-white border border-slate-200 p-4 rounded-2xl shadow-sm">
-                <div className="flex items-center gap-4">
+            <div className="flex flex-wrap items-center justify-between bg-white border border-slate-200 p-3 md:p-4 rounded-2xl shadow-sm gap-3">
+                <div className="flex items-center gap-3 md:gap-4">
                     {!isRecording ? (
                         <button
                             onClick={handleStartRecording}
-                            className="flex items-center gap-2 px-6 py-3 bg-slate-900 hover:bg-slate-700 text-white rounded-xl font-semibold transition-all shadow-md"
+                            className="flex items-center gap-2 px-4 md:px-6 py-2.5 md:py-3 bg-slate-900 hover:bg-slate-700 text-white rounded-xl font-semibold transition-all shadow-md text-sm md:text-base"
                         >
-                            <Mic size={20} />
+                            <Mic size={18} />
                             Start Meeting
                         </button>
                     ) : (
                         <button
                             onClick={handleStopRecording}
-                            className="flex items-center gap-2 px-6 py-3 bg-rose-500 hover:bg-rose-600 text-white rounded-xl font-semibold transition-all shadow-md"
+                            className="flex items-center gap-2 px-4 md:px-6 py-2.5 md:py-3 bg-rose-500 hover:bg-rose-600 text-white rounded-xl font-semibold transition-all shadow-md text-sm md:text-base"
                         >
-                            <Square size={20} />
+                            <Square size={18} />
                             Stop Recording
                         </button>
                     )}
 
-                    <div className="flex items-center gap-2 text-slate-500 text-sm ml-4">
+                    <div className="flex items-center gap-2 text-slate-500 text-xs md:text-sm">
                         <div className={`w-2.5 h-2.5 rounded-full ${isConnected ? 'bg-green-500' : 'bg-slate-600'}`} />
-                        {isConnected ? 'Connected' : 'Disconnected'}
-                        {meetingId && <span className="text-xs opacity-50 ml-2">ID: {meetingId.slice(0, 8)}</span>}
+                        <span className="hidden xs:inline">{isConnected ? 'Connected' : 'Disconnected'}</span>
+                        {meetingId && <span className="text-xs opacity-50 ml-1 hidden sm:inline">ID: {meetingId.slice(0, 8)}</span>}
                     </div>
                 </div>
 
@@ -101,10 +101,10 @@ export default function MeetingPage() {
                             setChatMessages([]);
                             setSummary('');
                         }}
-                        className="p-2 hover:bg-slate-100 rounded-lg text-slate-500 transition-colors"
+                        className="p-2.5 hover:bg-slate-100 rounded-lg text-slate-500 transition-colors"
                         title="Reset Meeting Context"
                     >
-                        <RotateCcw size={20} />
+                        <RotateCcw size={18} />
                     </button>
                 </div>
             </div>
@@ -129,24 +129,24 @@ export default function MeetingPage() {
                     <div className="flex border-b border-slate-200 bg-white">
                         <button
                             onClick={() => setActiveTab('summary')}
-                            className={`flex items-center gap-2 px-6 py-3 text-sm font-medium transition-colors relative
+                            className={`flex items-center gap-2 px-4 md:px-6 py-3 text-sm font-medium transition-colors relative whitespace-nowrap
                                 ${activeTab === 'summary' ? 'text-slate-900' : 'text-slate-500 hover:text-slate-700'}
                             `}
                         >
                             <FileText size={16} />
-                            Summary & Actions
+                            <span className="hidden xs:inline">Summary</span> & Actions
                             {activeTab === 'summary' && (
                                 <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-amber-500" />
                             )}
                         </button>
                         <button
                             onClick={() => setActiveTab('chat')}
-                            className={`flex items-center gap-2 px-6 py-3 text-sm font-medium transition-colors relative
+                            className={`flex items-center gap-2 px-4 md:px-6 py-3 text-sm font-medium transition-colors relative whitespace-nowrap
                                 ${activeTab === 'chat' ? 'text-slate-900' : 'text-slate-500 hover:text-slate-700'}
                             `}
                         >
                             <MessageSquare size={16} />
-                            Chat with Transcript (try: "push this to notion", "send this to a@x.com")
+                            <span className="hidden xs:inline">Chat</span> with Transcript
                             {activeTab === 'chat' && (
                                 <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-amber-500" />
                             )}
@@ -156,7 +156,7 @@ export default function MeetingPage() {
                     {/* Tab Content */}
                     <div className="flex-1 min-h-0 relative">
                         {activeTab === 'summary' ? (
-                            <div className="absolute inset-0 p-4 overflow-y-auto">
+                            <div className="absolute inset-0 p-3 md:p-4 overflow-y-auto">
                                 <SummaryPanel
                                     summary={summary}
                                     onEmail={handleEmail}

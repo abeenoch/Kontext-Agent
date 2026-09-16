@@ -49,12 +49,12 @@ export default function TranscriptPanel({ transcripts, interimTranscript, isReco
                     <>
                         {transcripts.map((item, index) => (
                             <div key={index} className="flex gap-4 group hover:bg-amber-50 p-2 rounded-lg transition-colors -mx-2">
-                                <span className="text-slate-500 text-xs mt-1 shrink-0 w-16 text-right font-medium select-none">
+                                <span className="text-slate-500 text-xs mt-1 shrink-0 w-16 sm:w-14 text-right font-medium select-none">
                                     {item.timestamp || new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                                 </span>
                                 <div className="flex-1">
                                     {item.speaker !== undefined && (
-                                        <span className="text-amber-700 text-xs font-bold mr-2 uppercase tracking-wide bg-amber-100 px-1.5 py-0.5 rounded">
+                                        <span className="text-amber-700 text-xs sm:text-[11px] font-bold mr-2 uppercase tracking-wide bg-amber-100 px-1.5 py-0.5 rounded leading-tight">
                                             Speaker {item.speaker}
                                         </span>
                                     )}
@@ -64,7 +64,7 @@ export default function TranscriptPanel({ transcripts, interimTranscript, isReco
                         ))}
                         {interimTranscript && (
                             <div className="flex gap-4 p-2 rounded-lg -mx-2 bg-amber-50 border border-amber-100">
-                                <span className="text-slate-500 text-xs mt-1 shrink-0 w-16 text-right font-medium select-none">
+                                <span className="text-slate-500 text-xs mt-1 shrink-0 w-16 sm:w-14 text-right font-medium select-none">
                                     now
                                 </span>
                                 <div className="flex-1">

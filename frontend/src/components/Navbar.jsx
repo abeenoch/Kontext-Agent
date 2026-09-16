@@ -39,7 +39,7 @@ export default function Navbar() {
 
                     {/* User Navigation */}
                     {user && (
-                        <div className="hidden md:flex items-center space-x-4">
+                        <div className="flex items-center space-x-4 flex-col sm:flex-row">
                             <NavLink to="/meeting" icon={Mic}>Meeting</NavLink>
                             <NavLink to="/chat" icon={MessageSquare}>Chat</NavLink>
                         </div>

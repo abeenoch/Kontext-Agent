@@ -132,7 +132,7 @@ export default function ChatPanel({
             {/* Input Area */}
             <div className="p-4 bg-white/90 border-t border-slate-200">
                 <form onSubmit={handleSubmit} className="flex items-end gap-3 max-w-4xl mx-auto relative">
-                    <div className="relative flex-1">
+                    <div className="relative flex-1 min-w-0">
                         <textarea
                             value={input}
                             onChange={(e) => setInput(e.target.value)}
@@ -145,7 +145,7 @@ export default function ChatPanel({
                                     handleSubmit(e);
                                 }
                             }}
-                            className="w-full bg-white border border-slate-300 rounded-2xl py-3 pl-4 pr-14 text-slate-900 focus:ring-2 focus:ring-amber-400 focus:border-amber-300 outline-none resize-none custom-scrollbar max-h-32 min-h-[48px]"
+                            className="w-full bg-white border border-slate-300 rounded-2xl py-3 pl-4 pr-14 text-slate-900 focus:ring-2 focus:ring-amber-400 focus:border-amber-300 outline-none resize-none custom-scrollbar max-h-32 min-h-[48px] sm:min-h-[56px] sm:max-h-32"
                         />
                         {enableVoiceInput && (
                             <div className="absolute right-2 bottom-2">
@@ -154,24 +154,26 @@ export default function ChatPanel({
                         )}
                     </div>
 
-                    <button
-                        type="submit"
-                        disabled={!input.trim() || isLoading}
-                        className="p-3 bg-slate-900 hover:bg-slate-700 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-full transition-all shadow-md mb-px"
-                    >
-                        <Send size={20} className={isLoading ? 'opacity-0' : ''} />
-                        {isLoading && <Loader2 size={20} className="absolute animate-spin" />}
-                    </button>
-                    {enableVoiceReply && (
+                    <div className="flex items-center gap-2 shrink-0">
                         <button
-                            type="button"
-                            onClick={() => setVoiceReplyEnabled((prev) => !prev)}
-                            className="p-3 rounded-full border border-slate-300 text-slate-600 hover:bg-slate-100 transition-colors mb-px"
-                            title={voiceReplyEnabled ? 'Disable voice replies' : 'Enable voice replies'}
+                            type="submit"
+                            disabled={!input.trim() || isLoading}
+                            className="p-3 bg-slate-900 hover:bg-slate-700 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-full transition-all shadow-md mb-px"
                         >
-                            {voiceReplyEnabled ? <Volume2 size={20} /> : <VolumeX size={20} />}
+                            <Send size={20} className={isLoading ? 'opacity-0' : ''} />
+                            {isLoading && <Loader2 size={20} className="absolute animate-spin" />}
                         </button>
-                    )}
+                        {enableVoiceReply && (
+                            <button
+                                type="button"
+                                onClick={() => setVoiceReplyEnabled((prev) => !prev)}
+                                className="p-3 rounded-full border border-slate-300 text-slate-600 hover:bg-slate-100 transition-colors mb-px"
+                                title={voiceReplyEnabled ? 'Disable voice replies' : 'Enable voice replies'}
+                            >
+                                {voiceReplyEnabled ? <Volume2 size={20} /> : <VolumeX size={20} />}
+                            </button>
+                        )}
+                    </div>
                 </form>
             </div>
 

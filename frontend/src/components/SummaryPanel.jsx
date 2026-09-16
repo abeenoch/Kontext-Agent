@@ -53,12 +53,12 @@ export default function SummaryPanel({ summary, onEmail, onNotion, onSlack, stat
                 </div>
             )}
 
-            <div className="p-4 border-b border-slate-200 bg-white flex items-center justify-between sticky top-0 z-10">
+            <div className="p-4 border-b border-slate-200 bg-white flex items-center justify-between sticky top-0 z-10 gap-2">
                 <h3 className="font-semibold text-slate-900 flex items-center gap-2">
                     <FileText size={18} className="text-amber-600" />
                     Meeting Summary
                 </h3>
-                <div className="flex gap-2">
+                <div className="flex gap-2 flex-wrap">
                     <button
                         onClick={onNotion}
                         disabled={isLoading || !summary}
