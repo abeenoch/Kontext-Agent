@@ -133,6 +133,49 @@ async def resolve_meetings(
         return (None, None)
 
 
+async def _rewrite_retrieval_query(
+    query: str,
+    meeting_titles: list[str],
+    temporal_range: str | None,
+) -> str:
+    """
+    Rewrite a conversational query into a standalone retrieval query.
+
+    "what about the deadline?" alone retrieves poorly; given the searched
+    meetings' titles and the resolved time range, the LLM produces a
+    keyword-rich standalone query ("project deadline date Q3 budget").
+    Falls back to the original query on any error — this must never fail
+    the search.
+    """
+    context_lines = []
+    if meeting_titles:
+        context_lines.append("Meetings being searched: " + "; ".join(meeting_titles[:5]))
+    if temporal_range:
+        context_lines.append(f"Time range of interest: {temporal_range}")
+
+    user_prompt = (
+        "Rewrite the user's question into a short standalone search query for "
+        "retrieving relevant meeting transcript excerpts.\n"
+        "Rules:\n"
+        "- Resolve pronouns and vague references using the context below.\n"
+        "- Keep important names, numbers and project terms verbatim.\n"
+        "- Output ONLY the rewritten query — no explanation, no quotes.\n\n"
+        + ("\n".join(context_lines) + "\n" if context_lines else "")
+        + f"User question: {query}"
+    )
+    try:
+        rewritten = await query_llm(
+            user_prompt,
+            temperature=0,
+        )
+        rewritten = (rewritten or "").strip().strip('"')
+        if rewritten and len(rewritten) <= 300:
+            return rewritten
+    except Exception as exc:
+        logger.debug("Query rewrite failed, using original: %s", exc)
+    return query
+
+
 async def cross_meeting_search(
     user_id: str,
     query: str,
@@ -165,15 +208,23 @@ async def cross_meeting_search(
             sources=[],
             temporal_range=temporal_range,
         )
-    elif meeting_ids is None:
-        chunk_items = await query_meetings_detailed(user_id, query, n_results=10)
+
+    # 4b. Rewrite the query into a standalone retrieval query using the
+    #     searched meetings' titles + temporal context. The ORIGINAL query is
+    #     still used for the final synthesis prompt so citations stay grounded
+    #     in what the user actually asked.
+    meeting_titles = [m.get("title", "") for m in meetings[:5] if m.get("title")]
+    retrieval_query = await _rewrite_retrieval_query(query, meeting_titles, temporal_range)
+
+    if meeting_ids is None:
+        chunk_items = await query_meetings_detailed(user_id, retrieval_query, n_results=10)
     else:
         # Non-empty list: query per meeting and deduplicate
         seen: set[str] = set()
         chunk_items: list[dict] = []
         for mid in meeting_ids:
             for item in await query_meetings_detailed(
-                user_id, query, meeting_id=mid, n_results=10
+                user_id, retrieval_query, meeting_id=mid, n_results=10
             ):
                 text = item.get("text", "")
                 if text not in seen:

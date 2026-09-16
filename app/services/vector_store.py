@@ -85,6 +85,71 @@ def _chunk_text(text: str, max_chars: int = 800, overlap: int = 120) -> list[str
     return chunks
 
 
+_SPEAKER_LINE_RE = re.compile(r"^\[Speaker (\d+)\]\s*(.*)$", re.MULTILINE)
+
+
+def _chunk_transcript_by_speaker(text: str, max_chars: int = 800) -> list[str]:
+    """
+    Chunk a diarized transcript by speaker turns instead of blind character windows.
+
+    Transcript lines look like ``[Speaker 2] some text``. Consecutive turns are
+    grouped into windows of at most ``max_chars`` characters; each window keeps
+    the speaker labels inline so the embedding carries speaker context. Falls
+    back to :func:`_chunk_text` when no speaker markers are present.
+    """
+    if not text or not text.strip():
+        return []
+
+    lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+    if not any(_SPEAKER_LINE_RE.match(ln) for ln in lines):
+        return _chunk_text(text)
+
+    # Build turn tuples (speaker, text), merging consecutive turns of the same speaker.
+    turns: list[tuple[str, str]] = []
+    current_speaker: str | None = None
+    buffer: list[str] = []
+    for line in lines:
+        m = _SPEAKER_LINE_RE.match(line)
+        if m:
+            if current_speaker is not None and buffer:
+                turns.append((current_speaker, " ".join(buffer).strip()))
+                buffer = []
+            current_speaker = f"Speaker {m.group(1)}"
+            buffer.append(m.group(2))
+        else:
+            # Continuation line (no marker) — keep in the current turn.
+            if current_speaker is None:
+                current_speaker = "Speaker ?"
+            buffer.append(line)
+    if current_speaker is not None and buffer:
+        turns.append((current_speaker, " ".join(buffer).strip()))
+
+    # Group turns into chunks <= max_chars, never splitting mid-turn.
+    chunks: list[str] = []
+    current: list[str] = []
+    current_len = 0
+    for speaker, body in turns:
+        piece = f"[{speaker}] {body}"
+        piece_len = len(piece) + 1  # +1 for joining space/newline
+        # A single over-long turn is hard-split by character window.
+        if piece_len > max_chars:
+            if current:
+                chunks.append("\n".join(current))
+                current, current_len = [], 0
+            for sub in _chunk_text(piece, max_chars=max_chars, overlap=80):
+                chunks.append(sub)
+            continue
+        if current_len + piece_len > max_chars and current:
+            chunks.append("\n".join(current))
+            current, current_len = [], 0
+        current.append(piece)
+        current_len += piece_len
+    if current:
+        chunks.append("\n".join(current))
+
+    return [c for c in chunks if c.strip()]
+
+
 async def ensure_user_collections(user_id: str, tab_id: str | None = None) -> None:
     """Create docs + meetings collections for a user (and tab) if missing."""
     loop = asyncio.get_running_loop()
@@ -162,7 +227,7 @@ async def add_meeting_chunk_embedding(
     """Embed and store an individual meeting transcript chunk."""
     if settings.app_env == "test":
         return
-    if not text or not text.strip():
+    if not text or _is_degenerate(text):
         return
 
     loop = asyncio.get_running_loop()
@@ -198,7 +263,7 @@ async def add_meeting_summary_embedding(
     """Embed and store the final meeting summary."""
     if settings.app_env == "test":
         return
-    if not summary_text or not summary_text.strip():
+    if not summary_text or _is_degenerate(summary_text):
         return
 
     loop = asyncio.get_running_loop()
@@ -238,7 +303,9 @@ async def add_full_transcript_embeddings(
     if not transcript_text or not transcript_text.strip():
         return
 
-    chunks = _chunk_text(transcript_text)
+    chunks = _chunk_transcript_by_speaker(transcript_text)
+    # Guard against degenerate fragments ever reaching the store.
+    chunks = [c for c in chunks if not _is_degenerate(c)]
     if not chunks:
         return
 
@@ -265,6 +332,101 @@ async def add_full_transcript_embeddings(
                 ],
             ),
         )
+
+
+# ── Hybrid retrieval (dense + BM25 keyword, fused with RRF) ──────────────────
+
+_STOPWORDS = frozenset(
+    """a an and are as at be but by for from has have how i in is it its of on or
+    say said she he they that the their them then there these this to was we were
+    what when where which who will with you your about into over after before""".split()
+)
+
+_TOKEN_RE = re.compile(r"[a-zA-Z0-9_']+")
+
+# Cap on the keyword-pass corpus scan so huge collections can't blow up memory.
+_BM25_MAX_CORPUS = 5000
+
+
+def _tokenize(text: str) -> list[str]:
+    """Lowercase word tokens minus stopwords — used by the BM25 keyword pass."""
+    return [
+        tok for tok in _TOKEN_RE.findall(text.lower())
+        if tok not in _STOPWORDS and len(tok) > 1
+    ]
+
+
+def _is_degenerate(text: str) -> bool:
+    """
+    True for fragments that carry no retrievable meaning — single characters,
+    empty strings, or stopword-only blobs. Guards both ingestion and query
+    assembly against the character-level junk that polluted some collections.
+    """
+    if not text or len(text.strip()) <= 2:
+        return True
+    return not _tokenize(text)
+
+
+def _bm25_idf(doc_freq: int, n_docs: int) -> float:
+    """Standard BM25 IDF with 0.5 smoothing, floored at 0."""
+    import math
+
+    return max(0.0, math.log((n_docs - doc_freq + 0.5) / (doc_freq + 0.5) + 1.0))
+
+
+def _bm25_scores(
+    query: str,
+    corpus_tokens: list[list[str]],
+    k1: float = 1.5,
+    b: float = 0.75,
+) -> list[float]:
+    """
+    Okapi BM25 over a pre-tokenized corpus. Returns one score per document.
+    Pure-python so it adds no dependency; fine for personal-scale corpora.
+    """
+    n_docs = len(corpus_tokens)
+    if n_docs == 0:
+        return []
+
+    query_tokens = _tokenize(query)
+    if not query_tokens:
+        return [0.0] * n_docs
+
+    doc_lens = [len(toks) for toks in corpus_tokens]
+    avg_len = sum(doc_lens) / n_docs
+
+    df: dict[str, int] = {}
+    for toks in corpus_tokens:
+        for term in set(toks):
+            df[term] = df.get(term, 0) + 1
+
+    scores = [0.0] * n_docs
+    for i, toks in enumerate(corpus_tokens):
+        tf: dict[str, int] = {}
+        for term in toks:
+            tf[term] = tf.get(term, 0) + 1
+        score = 0.0
+        for term in query_tokens:
+            freq = tf.get(term)
+            if not freq:
+                continue
+            idf = _bm25_idf(df.get(term, 0), n_docs)
+            denom = freq + k1 * (1 - b + b * doc_lens[i] / avg_len)
+            score += idf * (freq * (k1 + 1)) / denom
+        scores[i] = score
+    return scores
+
+
+def _rrf_fuse(ranked_lists: list[list[int]], k: int = 60, top_n: int = 10) -> list[int]:
+    """
+    Reciprocal Rank Fusion across ranked lists of indices.
+    Returns fused indices ordered by score, best first.
+    """
+    fused: dict[int, float] = {}
+    for ranked in ranked_lists:
+        for rank, idx in enumerate(ranked):
+            fused[idx] = fused.get(idx, 0.0) + 1.0 / (k + rank + 1)
+    return sorted(fused, key=lambda i: fused[i], reverse=True)[:top_n]
 
 
 async def query_meetings(
@@ -301,20 +463,24 @@ async def query_meetings_detailed(
     before_ts: Optional[float] = None,
     n_results: int = 5,
 ) -> List[dict]:
-    """Semantic search over meeting transcripts/summaries with optional filters.
+    """Hybrid semantic + keyword search over meeting transcripts/summaries.
 
-    Returns a list of dicts with keys ``text`` and ``meeting_id`` so callers can
-    attribute each chunk to its source meeting.
+    Dense (embedding) results from Chroma are fused with a BM25 keyword pass
+    via Reciprocal Rank Fusion. Exact-match content (names, project codenames,
+    budget figures) that embeddings miss gets recovered by the keyword pass.
+
+    Returns dicts with keys ``text``, ``meeting_id`` and ``match``
+    (``"hybrid"`` | ``"semantic"`` | ``"keyword"``).
     """
     if not query or not query.strip():
         return []
 
     collection = get_meetings_collection(user_id)
-    if collection.count() == 0:
+    total = collection.count()
+    if total == 0:
         return []
 
     loop = asyncio.get_running_loop()
-    query_embedding = await loop.run_in_executor(None, get_embedding, query)
 
     where: Dict[str, object] = {}
     if meeting_id:
@@ -327,26 +493,114 @@ async def query_meetings_detailed(
     if ts_filter:
         where["timestamp"] = ts_filter
 
-    try:
-        results = collection.query(
-            query_embeddings=[query_embedding.tolist()],
-            n_results=min(n_results, max(1, collection.count())),
-            where=where or None,
-        )
-        docs = results.get("documents", [[]])[0] or []
-        metas = results.get("metadatas", [[]])[0] or []
-        items: List[dict] = []
-        for doc, meta in zip(docs, metas):
-            items.append(
-                {
-                    "text": doc,
-                    "meeting_id": (meta or {}).get("meeting_id"),
-                }
+    def _dense_pass() -> list[tuple[str, dict | None]]:
+        try:
+            query_embedding = get_embedding(query)
+            results = collection.query(
+                query_embeddings=[query_embedding.tolist()],
+                n_results=min(max(n_results * 3, 12), max(1, total)),
+                where=where or None,
             )
-        return items
-    except Exception as exc:
-        logger.warning("Meeting query failed: %s", exc)
+            docs = results.get("documents", [[]])[0] or []
+            metas = results.get("metadatas", [[]])[0] or []
+            return [
+                (d, m) for d, m in zip(docs, metas) if not _is_degenerate(d)
+            ]
+        except Exception as exc:
+            logger.warning("Meeting dense query failed: %s", exc)
+            return []
+
+    def _keyword_pass() -> list[tuple[str, dict | None]]:
+        try:
+            # Prefer a time-bounded window (recent 90 days) so the keyword scan
+            # stays cheap on very large collections; fall back to a capped
+            # full scan when the window has no data.
+            kw_where = where or None
+            cutoff = time.time() - 90 * 86400
+            if kw_where:
+                window_where = {"$and": [dict(kw_where), {"timestamp": {"$gte": cutoff}}]}
+            else:
+                window_where = {"timestamp": {"$gte": cutoff}}
+
+            def _fetch(w):
+                data = collection.get(
+                    where=w, include=["documents", "metadatas"], limit=_BM25_MAX_CORPUS
+                )
+                docs: list[str] = []
+                metas: list[dict | None] = []
+                for batch_docs, batch_metas in zip(
+                    data.get("documents", []) or [], data.get("metadatas", []) or []
+                ):
+                    for d, m in zip(batch_docs or [], batch_metas or []):
+                        # Skip degenerate fragments (single chars, stopwords-only)
+                        if not _is_degenerate(d):
+                            docs.append(d)
+                            metas.append(m)
+                return docs, metas
+
+            docs, metas = _fetch(window_where)
+            if not docs:
+                docs, metas = _fetch(kw_where)
+            if not docs:
+                return []
+            corpus_tokens = [_tokenize(d) for d in docs]
+            scores = _bm25_scores(query, corpus_tokens)
+            ranked = sorted(range(len(docs)), key=lambda i: scores[i], reverse=True)
+            ranked = [i for i in ranked if scores[i] > 0.0][: max(n_results * 3, 12)]
+            return [(docs[i], metas[i]) for i in ranked]
+        except Exception as exc:
+            logger.debug("Meeting keyword query failed: %s", exc)
+            return []
+
+    dense_pairs, keyword_pairs = await asyncio.gather(
+        loop.run_in_executor(None, _dense_pass),
+        loop.run_in_executor(None, _keyword_pass),
+    )
+
+    if not dense_pairs and not keyword_pairs:
         return []
+
+    # Single-signal fallbacks keep behaviour sane when one pass finds nothing.
+    if not keyword_pairs:
+        return [
+            {"text": d, "meeting_id": (m or {}).get("meeting_id"), "match": "semantic"}
+            for d, m in dense_pairs[:n_results]
+        ]
+    if not dense_pairs:
+        return [
+            {"text": d, "meeting_id": (m or {}).get("meeting_id"), "match": "keyword"}
+            for d, m in keyword_pairs[:n_results]
+        ]
+
+    # Fuse: dense is the primary signal; keyword rescues exact matches.
+    fused_idx = _rrf_fuse(
+        [list(range(len(dense_pairs))), list(range(len(keyword_pairs)))],
+        top_n=max(n_results, 10),
+    )
+
+    # Deduplicate identical texts (both passes can surface the same chunk).
+    seen: set[str] = set()
+    items: List[dict] = []
+    for idx in fused_idx:
+        if idx < len(dense_pairs):
+            text, meta = dense_pairs[idx]
+            match = "hybrid"
+        else:
+            text, meta = keyword_pairs[idx - len(dense_pairs)]
+            match = "keyword"
+        if text in seen:
+            continue
+        seen.add(text)
+        items.append(
+            {
+                "text": text,
+                "meeting_id": (meta or {}).get("meeting_id"),
+                "match": match,
+            }
+        )
+        if len(items) >= n_results:
+            break
+    return items
 
 
 def delete_meeting_embeddings(user_id: str, meeting_id: str) -> None:
