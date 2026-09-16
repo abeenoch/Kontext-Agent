@@ -21,7 +21,7 @@ export default function TranscriptPanel({ transcripts, interimTranscript, isReco
 
     return (
         <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden flex flex-col h-full shadow-sm">
-            <div className="p-4 border-b border-slate-200 flex items-center justify-between bg-white sticky top-0 z-10">
+            <div className="shrink-0 p-4 border-b border-slate-200 flex items-center justify-between bg-white sticky top-0 z-10">
                 <h3 className="font-semibold text-slate-900 flex items-center gap-2">
                     {isRecording && (
                         <span className="w-2.5 h-2.5 rounded-full bg-red-500 animate-pulse shadow-[0_0_8px_rgba(239,68,68,0.6)]" />
@@ -39,7 +39,7 @@ export default function TranscriptPanel({ transcripts, interimTranscript, isReco
 
             <div
                 ref={containerRef}
-                className="flex-1 overflow-y-auto p-4 space-y-4 font-mono text-sm custom-scrollbar relative"
+                className="flex-1 min-h-0 overflow-y-auto p-4 space-y-4 font-mono text-sm custom-scrollbar relative"
             >
                 {(!transcripts || transcripts.length === 0) && !interimTranscript ? (
                     <div className="absolute inset-0 flex items-center justify-center text-slate-400 italic">

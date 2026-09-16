@@ -20,8 +20,8 @@ function SlackIcon({ size = 16 }) {
 export default function SummaryPanel({ summary, onEmail, onNotion, onSlack, status, isLoading }) {
     if (!summary && !isLoading) {
         return (
-            <div className="bg-white border border-slate-200 rounded-2xl p-8 flex flex-col text-slate-500 h-full border-dashed">
-                <div className="flex-1 flex flex-col items-center justify-center">
+            <div className="bg-white border border-slate-200 rounded-2xl p-5 md:p-8 flex flex-col text-slate-500 h-full border-dashed">
+                <div className="flex-1 min-h-0 flex flex-col items-center justify-center">
                     <FileText size={48} className="mb-4 opacity-20" />
                     <p className="text-sm font-medium">Summary will generate automatically</p>
                     <p className="text-xs mt-2 text-slate-500">Detailed notes appear here after sufficient context is gathered.</p>
@@ -29,7 +29,7 @@ export default function SummaryPanel({ summary, onEmail, onNotion, onSlack, stat
 
                 {status && (
                     <div className={`
-                        mt-4 px-4 py-3 text-sm border border-slate-200 rounded-lg flex items-center gap-2
+                        mt-4 px-4 py-3 text-sm border border-slate-200 rounded-lg flex items-center gap-2 shrink-0
                         ${status.type === 'error' ? 'text-red-700 bg-red-50' :
                             status.type === 'success' ? 'text-emerald-700 bg-emerald-50' :
                                 'text-amber-700 bg-amber-50'}
@@ -53,10 +53,10 @@ export default function SummaryPanel({ summary, onEmail, onNotion, onSlack, stat
                 </div>
             )}
 
-            <div className="p-4 border-b border-slate-200 bg-white flex items-center justify-between sticky top-0 z-10 gap-2">
-                <h3 className="font-semibold text-slate-900 flex items-center gap-2">
-                    <FileText size={18} className="text-amber-600" />
-                    Meeting Summary
+            <div className="p-4 border-b border-slate-200 bg-white flex items-center justify-between sticky top-0 z-10 gap-2 shrink-0">
+                <h3 className="font-semibold text-slate-900 flex items-center gap-2 min-w-0">
+                    <FileText size={18} className="text-amber-600 shrink-0" />
+                    <span className="truncate">Meeting Summary</span>
                 </h3>
                 <div className="flex gap-2 flex-wrap">
                     <button
@@ -86,13 +86,13 @@ export default function SummaryPanel({ summary, onEmail, onNotion, onSlack, stat
                 </div>
             </div>
 
-            <div className="flex-1 overflow-y-auto p-6 text-slate-700 prose prose-sm max-w-none custom-scrollbar">
+            <div className="flex-1 min-h-0 overflow-y-auto p-4 md:p-6 text-slate-700 prose prose-sm max-w-none custom-scrollbar">
                 <ReactMarkdown>{summary}</ReactMarkdown>
             </div>
 
             {status && (
                 <div className={`
-          px-4 py-3 text-sm border-t border-slate-200 flex items-center gap-2 
+          shrink-0 px-4 py-3 text-sm border-t border-slate-200 flex items-center gap-2 
           ${status.type === 'error' ? 'text-red-700 bg-red-50' :
                         status.type === 'success' ? 'text-emerald-700 bg-emerald-50' :
                             'text-amber-700 bg-amber-50'}

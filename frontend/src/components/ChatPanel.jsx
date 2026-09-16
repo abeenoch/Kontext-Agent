@@ -60,7 +60,7 @@ export default function ChatPanel({
         <div className="flex flex-col h-full bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-lg shadow-slate-200/70">
 
             {/* Messages Area */}
-            <div className="flex-1 overflow-y-auto p-4 space-y-6 custom-scrollbar bg-gradient-to-b from-white to-amber-50/40">
+            <div className="flex-1 min-h-0 overflow-y-auto p-4 space-y-6 custom-scrollbar bg-gradient-to-b from-white to-amber-50/40">
                 {messages.length === 0 ? (
                     <div className="h-full flex flex-col items-center justify-center text-slate-500">
                         <Bot size={48} className="mb-4 text-amber-500/70" />
@@ -130,7 +130,7 @@ export default function ChatPanel({
             </div>
 
             {/* Input Area */}
-            <div className="p-4 bg-white/90 border-t border-slate-200">
+            <div className="shrink-0 p-2.5 md:p-4 bg-white/90 border-t border-slate-200">
                 <form onSubmit={handleSubmit} className="flex items-end gap-3 max-w-4xl mx-auto relative">
                     <div className="relative flex-1 min-w-0">
                         <textarea
@@ -139,6 +139,18 @@ export default function ChatPanel({
                             placeholder={placeholder || "Type a message..."}
                             disabled={isLoading}
                             rows={1}
+                            onFocus={(e) => {
+                                // On phones the soft keyboard can cover the
+                                // composer — nudge it into view once it opens.
+                                const el = e.target;
+                                setTimeout(() => {
+                                    try {
+                                        el.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+                                    } catch (_e) {
+                                        /* older browsers: ignore */
+                                    }
+                                }, 250);
+                            }}
                             onKeyDown={(e) => {
                                 if (e.key === 'Enter' && !e.shiftKey) {
                                     e.preventDefault();
